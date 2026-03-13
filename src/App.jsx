@@ -23,7 +23,12 @@ export default function App() {
   const [previewCountdown, setPreviewCountdown] = useState(null);
   const [isCelebrating, setIsCelebrating] = useState(false);
   const [isTransitioning, setIsTransitioning] = useState(false);
-  const [leaderboard, setLeaderboard] = useState([]);
+  const [leaderboard, setLeaderboard] = useState(() => {
+    try {
+      const saved = localStorage.getItem('galaxy-sync-leaderboard');
+      return saved ? JSON.parse(saved) : [];
+    } catch { return []; }
+  });
   const [isMuted, setIsMuted] = useState(false);
   const [isScattering, setIsScattering] = useState(false);
   const [scoreAtLevelStart, setScoreAtLevelStart] = useState(0);
@@ -36,12 +41,14 @@ export default function App() {
   const [health, setHealth] = useState(100);
   const [maxHealth, setMaxHealth] = useState(100);
   const [tookDamage, setTookDamage] = useState(false);
+  const [playerName, setPlayerName] = useState('');
 
   const timerRef = useRef(null);
   const mismatchTimeoutRef = useRef(null);
   const enterKeyRef = useRef(0);
   const bgRef = useRef(null);
   const scatterDirsRef = useRef([]);
+  const pendingScoreRef = useRef(null);
 
   const generateScatterDirs = (count) => {
     scatterDirsRef.current = Array.from({ length: count }, () => {
@@ -55,9 +62,10 @@ export default function App() {
     });
   };
 
-  const saveScore = useCallback((finalScore, mode, lvl) => {
+  const saveScore = useCallback((finalScore, mode, lvl, name) => {
     setLeaderboard(prev => {
       const entry = {
+        name: name || 'Anonymous',
         score: finalScore,
         date: new Date().toLocaleDateString(),
         mode: mode || GAME_MODES.ENDLESS,
@@ -72,9 +80,15 @@ export default function App() {
     if (warpType === 'start') bgRef.current?.startGame();
     else if (warpType === 'next') bgRef.current?.nextRound();
     else if (warpType === 'menu') bgRef.current?.returnToMenu();
+    // Stop menu music immediately when starting the game
+    if (warpType === 'start') stopMusic();
+    // Play deep woosh when warp shader accelerates (not on menu return)
+    if (warpType === 'start' || warpType === 'next') {
+      playSound('warpWoosh', isMuted);
+    }
     setTimeout(() => { actionFn(); }, 650);
     setTimeout(() => { setIsTransitioning(false); }, 1300);
-  }, []);
+  }, [isMuted]);
 
   const setupLevel = useCallback((targetLevel, mode) => {
     const activeMode = mode ?? gameMode;
@@ -151,6 +165,11 @@ export default function App() {
     }, 1500);
     return () => clearTimeout(delayTimer);
   }, [previewCountdown, gameState, isMuted]);
+
+  // --- Persist leaderboard to localStorage ---
+  useEffect(() => {
+    try { localStorage.setItem('galaxy-sync-leaderboard', JSON.stringify(leaderboard)); } catch {}
+  }, [leaderboard]);
 
   // --- Splash screen dismiss: unlocks audio + transitions to menu with music ---
   const handleSplashDismiss = useCallback(() => {
@@ -262,12 +281,14 @@ export default function App() {
     setIsLocked(true);
     bgRef.current?.gameOver?.();
     setTimeout(() => {
-      if (score > 0) saveScore(score, gameMode, level);
+      if (score > 0) {
+        pendingScoreRef.current = { score, mode: gameMode, level };
+      }
       triggerTransition(() => {
         setGameState('GAME_OVER');
       }, 'menu');
     }, 800);
-  }, [health, gameMode, gameState, score, saveScore, triggerTransition]);
+  }, [health, gameMode, gameState, score, triggerTransition]);
 
   const handleCardClick = (index) => {
     if (isLocked || flippedIndices.length >= 2 || deck[index].isFlipped || deck[index].isMatched) return;
@@ -388,7 +409,7 @@ export default function App() {
         <div className="start-screen__content z-10 w-full max-w-md">
           <div className="text-center mb-5 sm:mb-6">
             <h2 className="text-2xl sm:text-3xl md:text-4xl font-light text-white tracking-wide mb-2">
-              Top <span className="text-[#0689D8] font-bold">Diagnostics</span>
+              Top <span className="text-[#0689D8] font-bold">Scores</span>
             </h2>
             <p className="text-gray-400 text-xs sm:text-sm tracking-widest uppercase">Ecosystem Leaders</p>
           </div>
@@ -427,10 +448,8 @@ export default function App() {
                         {i + 1}
                       </span>
                       <span className="flex flex-col">
-                        <span>{entry.date}</span>
-                        {isSurvivor && entry.level && (
-                          <span className="text-[9px] text-gray-600">Level {entry.level}</span>
-                        )}
+                        <span className="text-white font-medium">{entry.name || 'Anonymous'}</span>
+                        <span className="text-[9px] text-gray-600">{entry.date}{isSurvivor && entry.level ? ` · Level ${entry.level}` : ''}</span>
                       </span>
                     </div>
                     <span className="font-mono font-bold text-white tracking-wider text-xs sm:text-sm">{entry.score} <span className="text-[10px] sm:text-xs font-normal text-gray-500">pts</span></span>
@@ -684,26 +703,124 @@ export default function App() {
         <div className="flex flex-col gap-3 w-full max-w-xs mx-auto">
           <button
             className="start-screen__btn start-screen__btn--survivor w-full"
-            onClick={() => { playSound('menuSelect', isMuted); setGameMode(GAME_MODES.SURVIVOR); triggerTransition(() => { setScore(0); setCombo(0); setScoreAtLevelStart(0); setHealth(100); setMaxHealth(100); setupLevel(1, GAME_MODES.SURVIVOR); }, 'start'); }}
+            onClick={() => { playSound('click', isMuted); setGameState('NAME_INPUT'); }}
           >
             <span className="start-screen__btn-inner">
-              <span className="start-screen__btn-icon" aria-hidden="true"><RotateCcw size={18} /></span>
-              Try Again
+              <span className="start-screen__btn-icon" aria-hidden="true"><Trophy size={18} /></span>
+              Save Score
             </span>
           </button>
           <button
             className="start-screen__btn start-screen__btn--secondary w-full"
-            onClick={() => { playSound('click', isMuted); triggerTransition(() => setGameState('MENU'), 'menu'); }}
+            onClick={() => { playSound('click', isMuted); pendingScoreRef.current = null; triggerTransition(() => setGameState('MENU'), 'menu'); }}
           >
             <span className="start-screen__btn-inner">
               <span className="start-screen__btn-icon" aria-hidden="true"><Home size={18} /></span>
-              Main Menu
+              Skip & Main Menu
             </span>
           </button>
         </div>
       </div>
     </div>
   );
+
+  const handleNameSubmit = () => {
+    const pending = pendingScoreRef.current;
+    if (pending) {
+      saveScore(pending.score, pending.mode, pending.level, playerName.trim());
+      pendingScoreRef.current = null;
+    }
+    setPlayerName('');
+    triggerTransition(() => setGameState('MENU'), 'menu');
+  };
+
+  const renderNameInput = () => {
+    const kbRows = [
+      ['Q','W','E','R','T','Y','U','I','O','P'],
+      ['A','S','D','F','G','H','J','K','L'],
+      ['Z','X','C','V','B','N','M'],
+    ];
+    const handleKey = (key) => {
+      playSound('click', isMuted);
+      if (key === 'DEL') {
+        setPlayerName(prev => prev.slice(0, -1));
+      } else if (key === 'SPACE') {
+        setPlayerName(prev => prev.length < 16 ? prev + ' ' : prev);
+      } else {
+        setPlayerName(prev => prev.length < 16 ? prev + key : prev);
+      }
+    };
+
+    return (
+      <div className="start-screen">
+        <div className="start-screen__content z-10 w-full max-w-lg px-3">
+          <div className="text-center mb-3 sm:mb-4">
+            <h2 className="text-xl sm:text-2xl md:text-3xl font-light text-white tracking-wide mb-1">
+              <span className="text-[#0689D8] font-bold">Save Score</span>
+            </h2>
+            <p className="text-gray-400 text-[10px] sm:text-xs tracking-widest uppercase">
+              {pendingScoreRef.current?.score || 0} pts — Level {pendingScoreRef.current?.level || 1}
+            </p>
+          </div>
+
+          {/* Name display */}
+          <div className="w-full bg-[#0A0A0A] border border-[#333] rounded-xl px-4 py-3 mb-4 min-h-[52px] flex items-center justify-center">
+            {playerName ? (
+              <span className="text-white text-xl sm:text-2xl font-mono tracking-[0.2em] text-center">{playerName}<span className="animate-pulse text-[#0689D8]">|</span></span>
+            ) : (
+              <span className="text-gray-600 text-lg font-mono tracking-wider">Tap to enter name</span>
+            )}
+          </div>
+
+          {/* On-screen keyboard */}
+          <div className="w-full bg-[#1A1A1A]/80 border border-[#2A2A2A] backdrop-blur-md rounded-2xl p-2 sm:p-3 mb-4 shadow-2xl">
+            {kbRows.map((row, ri) => (
+              <div key={ri} className="flex justify-center gap-[5px] sm:gap-1.5 mb-[5px] sm:mb-1.5">
+                {row.map((key) => (
+                  <button
+                    key={key}
+                    onClick={() => handleKey(key)}
+                    className="w-[30px] h-[40px] sm:w-[38px] sm:h-[46px] md:w-[42px] md:h-[50px] bg-[#252525] hover:bg-[#333] active:bg-[#0689D8] active:scale-95 border border-[#3a3a3a] rounded-lg text-white text-sm sm:text-base font-semibold transition-all duration-100 select-none touch-manipulation"
+                  >
+                    {key}
+                  </button>
+                ))}
+              </div>
+            ))}
+            {/* Bottom row: delete, space, done */}
+            <div className="flex justify-center gap-[5px] sm:gap-1.5">
+              <button
+                onClick={() => handleKey('DEL')}
+                className="h-[40px] sm:h-[46px] md:h-[50px] px-3 sm:px-4 bg-[#302020] hover:bg-[#443030] active:bg-red-500 active:scale-95 border border-[#3a3a3a] rounded-lg text-red-400 active:text-white text-xs sm:text-sm font-semibold tracking-wider transition-all duration-100 select-none touch-manipulation"
+              >
+                DEL
+              </button>
+              <button
+                onClick={() => handleKey('SPACE')}
+                className="flex-1 h-[40px] sm:h-[46px] md:h-[50px] bg-[#252525] hover:bg-[#333] active:bg-[#0689D8] active:scale-95 border border-[#3a3a3a] rounded-lg text-gray-400 text-xs sm:text-sm font-semibold tracking-widest transition-all duration-100 select-none touch-manipulation"
+              >
+                SPACE
+              </button>
+              <button
+                onClick={handleNameSubmit}
+                className="h-[40px] sm:h-[46px] md:h-[50px] px-4 sm:px-6 bg-[#0689D8] hover:bg-[#07a0f5] active:bg-[#0560a0] active:scale-95 border border-[#0689D8]/50 rounded-lg text-white text-xs sm:text-sm font-bold tracking-wider transition-all duration-100 select-none touch-manipulation shadow-[0_0_15px_rgba(6,137,216,0.3)]"
+              >
+                SAVE
+              </button>
+            </div>
+          </div>
+
+          {/* Skip button */}
+          <button
+            className="w-full text-center text-gray-500 hover:text-gray-300 text-xs sm:text-sm tracking-widest uppercase py-2 transition-colors touch-manipulation"
+            onClick={() => { playSound('click', isMuted); pendingScoreRef.current = null; setPlayerName(''); triggerTransition(() => setGameState('MENU'), 'menu'); }}
+          >
+            Skip
+          </button>
+        </div>
+      </div>
+    );
+  };
 
   const handleAdvanceLevel = () => {
     generateScatterDirs(deck.length);
@@ -714,6 +831,7 @@ export default function App() {
     setTimeout(() => {
       setIsTransitioning(true);
       bgRef.current?.nextRound();
+      playSound('warpWoosh', isMuted);
       setTimeout(() => {
         setIsScattering(false);
         setScoreAtLevelStart(score);
@@ -724,7 +842,9 @@ export default function App() {
   };
 
   const handleReturnToDashboard = () => {
-    if (score > 0) saveScore(score, gameMode, level);
+    if (score > 0) {
+      pendingScoreRef.current = { score, mode: gameMode, level };
+    }
     generateScatterDirs(deck.length);
     setGameState('SCATTERING');
     setIsScattering(true);
@@ -735,7 +855,11 @@ export default function App() {
       bgRef.current?.returnToMenu();
       setTimeout(() => {
         setIsScattering(false);
-        setGameState('MENU');
+        if (pendingScoreRef.current) {
+          setGameState('NAME_INPUT');
+        } else {
+          setGameState('MENU');
+        }
       }, 650);
       setTimeout(() => { setIsTransitioning(false); }, 1300);
     }, 1800);
@@ -746,9 +870,9 @@ export default function App() {
       <SpaceBackground ref={bgRef} />
       <div className={`relative z-10 w-full h-full min-h-screen min-h-[100dvh] flex flex-col items-center justify-center py-4 sm:py-6 transition-opacity duration-[650ms] ease-[cubic-bezier(.22,1,.36,1)] ${isTransitioning ? 'opacity-0' : 'opacity-100'}`}>
         {/* Fixed buttons — z-40 to stay below modal z-60 */}
-        {gameState !== 'MENU' && gameState !== 'LEADERBOARD' && gameState !== 'SPLASH' && (
+        {gameState !== 'MENU' && gameState !== 'LEADERBOARD' && gameState !== 'SPLASH' && gameState !== 'NAME_INPUT' && gameState !== 'GAME_OVER' && (
           <button
-            onClick={() => { playSound('click', isMuted); if (score > 0) saveScore(score, gameMode, level); triggerTransition(() => setGameState('MENU'), 'menu'); }}
+            onClick={() => { playSound('click', isMuted); if (score > 0) { pendingScoreRef.current = { score, mode: gameMode, level }; setGameState('NAME_INPUT'); } else { triggerTransition(() => setGameState('MENU'), 'menu'); } }}
             className="fixed top-3 left-3 sm:top-4 sm:left-4 md:left-6 z-40 p-2 text-gray-500 hover:text-white transition-colors flex items-center group"
             aria-label="Back to Menu"
           >
@@ -846,7 +970,7 @@ export default function App() {
         {gameState === 'SPLASH' && renderSplash()}
         {gameState === 'MENU' && renderMenu()}
         {gameState === 'LEADERBOARD' && renderLeaderboard()}
-        {gameState !== 'MENU' && gameState !== 'LEADERBOARD' && gameState !== 'SPLASH' && (
+        {gameState !== 'MENU' && gameState !== 'LEADERBOARD' && gameState !== 'SPLASH' && gameState !== 'NAME_INPUT' && (
           <>
             {renderSyncBar()}
             {renderHealthBar()}
@@ -863,6 +987,7 @@ export default function App() {
           </>
         )}
         {gameState === 'GAME_OVER' && renderGameOver()}
+        {gameState === 'NAME_INPUT' && renderNameInput()}
         {gameState === 'LEVEL_COMPLETE' && (
           <LevelCompleteScreen
             level={level}

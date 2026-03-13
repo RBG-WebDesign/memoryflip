@@ -402,6 +402,64 @@ export const playSound = (type, isMuted) => {
       break;
     }
 
+    // --- Deep warp woosh: plays when the shader warp accelerates ---
+    case 'warpWoosh': {
+      // Bass body — sine sweep 150Hz → 80Hz (audible on laptop speakers)
+      const rumble = audioCtx.createOscillator();
+      const rumbleGain = audioCtx.createGain();
+      rumble.type = 'sine';
+      rumble.frequency.setValueAtTime(150, t);
+      rumble.frequency.exponentialRampToValueAtTime(80, t + 0.9);
+      rumbleGain.gain.setValueAtTime(0.25, t);
+      rumbleGain.gain.linearRampToValueAtTime(0.3, t + 0.2);
+      rumbleGain.gain.exponentialRampToValueAtTime(0.001, t + 0.9);
+      rumble.connect(rumbleGain);
+      rumbleGain.connect(sfxGain);
+      rumble.start(t);
+      rumble.stop(t + 1.0);
+
+      // Ascending whoosh sweep — sawtooth 200Hz → 1500Hz → 100Hz
+      const whoosh = audioCtx.createOscillator();
+      const whooshGain = audioCtx.createGain();
+      whoosh.type = 'sawtooth';
+      whoosh.frequency.setValueAtTime(200, t);
+      whoosh.frequency.exponentialRampToValueAtTime(1500, t + 0.3);
+      whoosh.frequency.exponentialRampToValueAtTime(100, t + 0.8);
+      whooshGain.gain.setValueAtTime(0.1, t);
+      whooshGain.gain.linearRampToValueAtTime(0.15, t + 0.25);
+      whooshGain.gain.exponentialRampToValueAtTime(0.001, t + 0.8);
+      whoosh.connect(whooshGain);
+      whooshGain.connect(sfxGain);
+      whoosh.start(t);
+      whoosh.stop(t + 0.85);
+
+      // Bandpass noise wash — clearly audible woosh texture
+      const noiseBuf = audioCtx.createBuffer(1, audioCtx.sampleRate * 1.0, audioCtx.sampleRate);
+      const noiseData = noiseBuf.getChannelData(0);
+      for (let i = 0; i < noiseData.length; i++) noiseData[i] = Math.random() * 2 - 1;
+      const noiseSrc = audioCtx.createBufferSource();
+      noiseSrc.buffer = noiseBuf;
+      const bp = audioCtx.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.setValueAtTime(400, t);
+      bp.frequency.exponentialRampToValueAtTime(2500, t + 0.25);
+      bp.frequency.exponentialRampToValueAtTime(300, t + 0.8);
+      bp.Q.value = 1.5;
+      const noiseEnv = audioCtx.createGain();
+      noiseEnv.gain.setValueAtTime(0.15, t);
+      noiseEnv.gain.linearRampToValueAtTime(0.25, t + 0.2);
+      noiseEnv.gain.exponentialRampToValueAtTime(0.001, t + 0.8);
+      noiseSrc.connect(bp);
+      bp.connect(noiseEnv);
+      noiseEnv.connect(sfxGain);
+      noiseSrc.start(t);
+      noiseSrc.stop(t + 0.9);
+
+      // Impact thud at onset
+      playKick(t + 0.05, 0.2, sfxGain);
+      break;
+    }
+
     // --- Preview cards dealing sound ---
     case 'deal': {
       createOsc('triangle', 400 + Math.random() * 200, t, 0.04, 0.04, sfxGain);
