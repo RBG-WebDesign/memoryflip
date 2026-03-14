@@ -6,15 +6,27 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "remotion:studio": "npx remotion studio src/remotion/index.ts",
+    "remotion:render": "npx remotion render src/remotion/index.ts",
+    "remotion:render:card": "npx remotion render src/remotion/index.ts CardReveal --output=out/card-reveal.mp4",
+    "remotion:render:score": "npx remotion render src/remotion/index.ts ScorePopup --output=out/score-popup.webm",
+    "remotion:render:product": "npx remotion render src/remotion/index.ts ProductShowcase --output=out/product-showcase.mp4",
+    "remotion:render:atom": "npx remotion render src/remotion/index.ts AtomAnimation --output=out/atom-animation.mp4",
+    "remotion:render:sheen": "npx remotion render src/remotion/index.ts CardSheenLoop --output=src/assets/cards/card-metallic-sheen.webm --codec=vp8 --image-format=png"
   },
   "dependencies": {
+    "@remotion/cli": "^4.0.435",
+    "@remotion/player": "^4.0.435",
     "lucide-react": "^0.395.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "remotion": "^4.0.435",
     "three": "^0.165.0"
   },
   "devDependencies": {
+    "@remotion/bundler": "^4.0.435",
+    "@remotion/renderer": "^4.0.435",
     "@vitejs/plugin-react": "^4.3.1",
     "autoprefixer": "^10.4.19",
     "postcss": "^8.4.38",

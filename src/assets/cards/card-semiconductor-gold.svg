@@ -1,0 +1,106 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="96 32 320 448" role="img" aria-labelledby="title desc">
+  <title id="title">Semiconductor Gold Card</title>
+  <desc id="desc">Square-edged playing card with a semiconductor gold finish and etched contact patterns.</desc>
+  <defs>
+    <linearGradient id="goldBase" x1="96" y1="32" x2="416" y2="480" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#d1a23a"/>
+      <stop offset="0.12" stop-color="#9f7317"/>
+      <stop offset="0.28" stop-color="#e6c56e"/>
+      <stop offset="0.46" stop-color="#b5831f"/>
+      <stop offset="0.62" stop-color="#f0d88d"/>
+      <stop offset="0.8" stop-color="#9d6e18"/>
+      <stop offset="1" stop-color="#c89832"/>
+    </linearGradient>
+    <linearGradient id="goldInner" x1="124" y1="60" x2="388" y2="452" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#f3da95"/>
+      <stop offset="0.1" stop-color="#c6922b"/>
+      <stop offset="0.2" stop-color="#f7e7ae"/>
+      <stop offset="0.42" stop-color="#bb8926"/>
+      <stop offset="0.58" stop-color="#e8ca79"/>
+      <stop offset="0.76" stop-color="#a5721b"/>
+      <stop offset="1" stop-color="#ddb960"/>
+    </linearGradient>
+    <linearGradient id="goldSheen" x1="124" y1="60" x2="388" y2="452" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#fff3c2" stop-opacity="0.72"/>
+      <stop offset="0.16" stop-color="#fff6d9" stop-opacity="0.14"/>
+      <stop offset="0.5" stop-color="#fff0b5" stop-opacity="0.08"/>
+      <stop offset="0.82" stop-color="#5f3d02" stop-opacity="0.08"/>
+      <stop offset="1" stop-color="#000000" stop-opacity="0.14"/>
+    </linearGradient>
+    <linearGradient id="traceGold" x1="140" y1="90" x2="372" y2="430" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#fff0af"/>
+      <stop offset="0.34" stop-color="#f0d37f"/>
+      <stop offset="0.68" stop-color="#c08a25"/>
+      <stop offset="1" stop-color="#ffefae"/>
+    </linearGradient>
+    <filter id="cardShadow" x="-30%" y="-30%" width="160%" height="180%">
+      <feDropShadow dx="0" dy="16" stdDeviation="16" flood-color="#2a1800" flood-opacity="0.22"/>
+    </filter>
+    <pattern id="microDots" width="8" height="8" patternUnits="userSpaceOnUse">
+      <circle cx="2" cy="2" r="1.2" fill="#f9e8a4" fill-opacity="0.85"/>
+      <circle cx="6" cy="6" r="1" fill="#a9741e" fill-opacity="0.35"/>
+    </pattern>
+    <pattern id="padGrid" width="8" height="10" patternUnits="userSpaceOnUse">
+      <rect x="2.3" y="1.2" width="3.4" height="7.2" rx="0.8" fill="#f7e29e"/>
+      <rect x="2.7" y="1.8" width="2.6" height="6" rx="0.6" fill="#c48c29" fill-opacity="0.45"/>
+    </pattern>
+    <pattern id="smallPads" width="7" height="8" patternUnits="userSpaceOnUse">
+      <rect x="1.8" y="1.3" width="3.4" height="4.8" rx="0.6" fill="#faebb4"/>
+    </pattern>
+  </defs>
+
+  <g>
+    <rect x="96" y="32" width="320" height="448" fill="url(#goldBase)"/>
+    <rect x="108" y="44" width="296" height="424" fill="#a8741f"/>
+    <rect x="124" y="60" width="264" height="392" fill="url(#goldInner)"/>
+    <rect x="124" y="60" width="264" height="392" fill="url(#goldSheen)"/>
+
+    <rect x="136" y="74" width="240" height="108" fill="url(#padGrid)" opacity="0.95"/>
+    <rect x="136" y="194" width="240" height="116" fill="url(#padGrid)" opacity="0.95"/>
+    <rect x="136" y="322" width="240" height="92" fill="url(#smallPads)" opacity="0.95"/>
+
+    <rect x="132" y="186" width="248" height="5" fill="#f5dd97" opacity="0.92"/>
+    <rect x="132" y="314" width="248" height="5" fill="#f5dd97" opacity="0.92"/>
+    <rect x="132" y="420" width="248" height="5" fill="#f5dd97" opacity="0.92"/>
+
+    <rect x="154" y="336" width="204" height="66" fill="url(#microDots)" opacity="0.85"/>
+    <rect x="148" y="82" width="8" height="92" fill="#ba8423" opacity="0.65"/>
+    <rect x="356" y="82" width="8" height="92" fill="#ba8423" opacity="0.65"/>
+    <rect x="148" y="202" width="8" height="100" fill="#ba8423" opacity="0.65"/>
+    <rect x="356" y="202" width="8" height="100" fill="#ba8423" opacity="0.65"/>
+    <rect x="148" y="330" width="8" height="78" fill="#ba8423" opacity="0.65"/>
+    <rect x="356" y="330" width="8" height="78" fill="#ba8423" opacity="0.65"/>
+
+    <g stroke="url(#traceGold)" stroke-width="3" stroke-linecap="square" fill="none" opacity="0.9">
+      <path d="M156 108h200"/>
+      <path d="M156 128h200"/>
+      <path d="M156 148h200"/>
+      <path d="M156 228h200"/>
+      <path d="M156 248h200"/>
+      <path d="M156 268h200"/>
+      <path d="M156 344h196"/>
+      <path d="M156 364h196"/>
+      <path d="M156 384h196"/>
+      <path d="M176 332v72"/>
+      <path d="M212 332v72"/>
+      <path d="M248 332v72"/>
+      <path d="M284 332v72"/>
+      <path d="M320 332v72"/>
+    </g>
+
+    <g fill="#fff1bc" opacity="0.92">
+      <rect x="140" y="88" width="6" height="86"/>
+      <rect x="366" y="88" width="6" height="86"/>
+      <rect x="140" y="208" width="6" height="94"/>
+      <rect x="366" y="208" width="6" height="94"/>
+      <rect x="140" y="334" width="6" height="70"/>
+      <rect x="366" y="334" width="6" height="70"/>
+      <rect x="132" y="188" width="248" height="2"/>
+      <rect x="132" y="316" width="248" height="2"/>
+      <rect x="132" y="422" width="248" height="2"/>
+    </g>
+
+    <rect x="136" y="74" width="240" height="352" fill="none" stroke="#fff0b0" stroke-opacity="0.34" stroke-width="1.5"/>
+    <rect x="96.5" y="32.5" width="319" height="447" fill="none" stroke="#f0d386" stroke-opacity="0.34"/>
+  </g>
+</svg>

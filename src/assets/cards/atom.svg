@@ -1,0 +1,85 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">Atom</title>
+  <desc id="desc">Transparent realistic atom icon with glowing nucleus and orbital electrons.</desc>
+  <defs>
+    <radialGradient id="nucleusGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#fff6d7"/>
+      <stop offset="35%" stop-color="#ffb65c"/>
+      <stop offset="70%" stop-color="#ff6a3d"/>
+      <stop offset="100%" stop-color="#b61f34"/>
+    </radialGradient>
+    <radialGradient id="electronFill" cx="35%" cy="35%" r="65%">
+      <stop offset="0%" stop-color="#f4fdff"/>
+      <stop offset="40%" stop-color="#83f2ff"/>
+      <stop offset="100%" stop-color="#1ba8ff"/>
+    </radialGradient>
+    <linearGradient id="orbitStrokeA" x1="120" y1="256" x2="392" y2="256" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#74f8ff" stop-opacity="0.18"/>
+      <stop offset="25%" stop-color="#96fbff" stop-opacity="0.92"/>
+      <stop offset="50%" stop-color="#d8ffff" stop-opacity="1"/>
+      <stop offset="75%" stop-color="#8beeff" stop-opacity="0.92"/>
+      <stop offset="100%" stop-color="#59c6ff" stop-opacity="0.2"/>
+    </linearGradient>
+    <linearGradient id="orbitStrokeB" x1="150" y1="150" x2="362" y2="362" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#9cf7ff" stop-opacity="0.22"/>
+      <stop offset="30%" stop-color="#c4ffff" stop-opacity="0.98"/>
+      <stop offset="68%" stop-color="#72d7ff" stop-opacity="0.95"/>
+      <stop offset="100%" stop-color="#4ba2ff" stop-opacity="0.18"/>
+    </linearGradient>
+    <linearGradient id="orbitStrokeC" x1="362" y1="150" x2="150" y2="362" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#95ebff" stop-opacity="0.18"/>
+      <stop offset="30%" stop-color="#ddffff" stop-opacity="0.98"/>
+      <stop offset="68%" stop-color="#89e8ff" stop-opacity="0.96"/>
+      <stop offset="100%" stop-color="#48b4ff" stop-opacity="0.2"/>
+    </linearGradient>
+    <filter id="softGlow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="10" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <filter id="nucleusShadow" x="-40%" y="-40%" width="180%" height="180%">
+      <feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#0f2047" flood-opacity="0.28"/>
+    </filter>
+  </defs>
+
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <ellipse cx="256" cy="256" rx="168" ry="70" stroke="url(#orbitStrokeA)" stroke-width="12"/>
+    <ellipse cx="256" cy="256" rx="168" ry="70" transform="rotate(60 256 256)" stroke="url(#orbitStrokeB)" stroke-width="12"/>
+    <ellipse cx="256" cy="256" rx="168" ry="70" transform="rotate(-60 256 256)" stroke="url(#orbitStrokeC)" stroke-width="12"/>
+
+    <ellipse cx="256" cy="256" rx="168" ry="70" stroke="#dffcff" stroke-opacity="0.12" stroke-width="4"/>
+    <ellipse cx="256" cy="256" rx="168" ry="70" transform="rotate(60 256 256)" stroke="#f3ffff" stroke-opacity="0.12" stroke-width="4"/>
+    <ellipse cx="256" cy="256" rx="168" ry="70" transform="rotate(-60 256 256)" stroke="#d8f8ff" stroke-opacity="0.12" stroke-width="4"/>
+  </g>
+
+  <g filter="url(#softGlow)" opacity="0.8">
+    <circle cx="256" cy="256" r="56" fill="#ff8b52" opacity="0.2"/>
+    <circle cx="156" cy="152" r="22" fill="#61d8ff" opacity="0.28"/>
+    <circle cx="352" cy="162" r="20" fill="#59bfff" opacity="0.26"/>
+    <circle cx="338" cy="350" r="22" fill="#67e8ff" opacity="0.24"/>
+  </g>
+
+  <g filter="url(#nucleusShadow)">
+    <circle cx="232" cy="246" r="34" fill="url(#nucleusGlow)"/>
+    <circle cx="286" cy="270" r="30" fill="url(#nucleusGlow)"/>
+    <circle cx="260" cy="220" r="26" fill="url(#nucleusGlow)"/>
+    <circle cx="250" cy="278" r="24" fill="url(#nucleusGlow)"/>
+    <circle cx="280" cy="236" r="22" fill="#ffd68f" opacity="0.92"/>
+    <circle cx="242" cy="232" r="10" fill="#fff7df" opacity="0.82"/>
+  </g>
+
+  <g filter="url(#softGlow)">
+    <circle cx="156" cy="152" r="14" fill="url(#electronFill)"/>
+    <circle cx="352" cy="162" r="14" fill="url(#electronFill)"/>
+    <circle cx="338" cy="350" r="14" fill="url(#electronFill)"/>
+  </g>
+
+  <g opacity="0.7">
+    <circle cx="150" cy="146" r="4" fill="#f4fdff"/>
+    <circle cx="346" cy="156" r="4" fill="#f4fdff"/>
+    <circle cx="332" cy="344" r="4" fill="#f4fdff"/>
+    <path d="M214 210c18-16 48-18 68-2" fill="none" stroke="#fff8e4" stroke-opacity="0.42" stroke-width="8"/>
+  </g>
+</svg>

@@ -1,35 +1,53 @@
-import memoryChip from '../assets/cards-vivid/memory-chip.svg';
-import gpuCard from '../assets/cards-vivid/gpu-card.svg';
-import motherboard from '../assets/cards-vivid/motherboard.svg';
-import hardDrive from '../assets/cards-vivid/hard-drive.svg';
-import ssdDrive from '../assets/cards-vivid/ssd-drive.svg';
-import ramModule from '../assets/cards-vivid/ram-module.svg';
-import circuitBoard from '../assets/cards-vivid/circuit-board.svg';
-import coolingFan from '../assets/cards-vivid/cooling-fan.svg';
-import usbDrive from '../assets/cards-vivid/usb-drive.svg';
-import hdmiCable from '../assets/cards-vivid/hdmi-cable.svg';
-import monitor from '../assets/cards-vivid/monitor-silhouette.svg';
-import floppyDisk from '../assets/cards-vivid/floppy-disk.svg';
-import cd from '../assets/cards-vivid/cd.svg';
-import binaryPattern from '../assets/cards-vivid/binary-pattern.svg';
-import laptop from '../assets/cards-vivid/samsung-laptop-silhouette.svg';
+import am9c1 from '../assets/icons/AM9C1.png';
+import gddr7 from '../assets/icons/GDDR7.png';
+import hbm4 from '../assets/icons/HBM4.png';
+import lpddr5x from '../assets/icons/LPDDR5X.png';
+import pm1763 from '../assets/icons/PM1763.png';
+import desktopSpeaker from '../assets/icons/desktop-speaker.png';
+import ethernetPlug from '../assets/icons/ethernet-plug.png';
+import externalHardDrive from '../assets/icons/external-hard-drive.png';
+import hdmiCable from '../assets/icons/hdmi-cable.png';
+import joystick from '../assets/icons/joystick.png';
+import liquidCooling from '../assets/icons/liquid-cooling-radiator.png';
+import microphone from '../assets/icons/microphone.png';
+import nasBox from '../assets/icons/nas-box.png';
+import pcieCaptureCard from '../assets/icons/pcie-capture-card.png';
+import powerBank from '../assets/icons/power-bank.png';
+import printer from '../assets/icons/printer.png';
+import solarCellRemote from '../assets/icons/samsung-solarcell-remote.png';
+import sdAdapter from '../assets/icons/sd-adapter.png';
+import soundCard from '../assets/icons/sound-card.png';
+import usbDongle from '../assets/icons/usb-dongle.png';
+import usbHub from '../assets/icons/usb-hub.png';
+import vrHeadset from '../assets/icons/vr-headset.png';
+import webcam from '../assets/icons/webcam.png';
+import wifiRouter from '../assets/icons/wifi-router.png';
 
 export const ALL_ICONS = [
-  { name: 'Memory Chip', icon: memoryChip },
-  { name: 'GPU Card', icon: gpuCard },
-  { name: 'Motherboard', icon: motherboard },
-  { name: 'Hard Drive', icon: hardDrive },
-  { name: 'SSD Drive', icon: ssdDrive },
-  { name: 'RAM Module', icon: ramModule },
-  { name: 'Circuit Board', icon: circuitBoard },
-  { name: 'Cooling Fan', icon: coolingFan },
-  { name: 'USB Drive', icon: usbDrive },
+  { name: 'AM9C1', icon: am9c1 },
+  { name: 'GDDR7', icon: gddr7 },
+  { name: 'HBM4', icon: hbm4 },
+  { name: 'LPDDR5X', icon: lpddr5x },
+  { name: 'PM1763', icon: pm1763 },
+  { name: 'Desktop Speaker', icon: desktopSpeaker },
+  { name: 'Ethernet Plug', icon: ethernetPlug },
+  { name: 'External Hard Drive', icon: externalHardDrive },
   { name: 'HDMI Cable', icon: hdmiCable },
-  { name: 'Monitor', icon: monitor },
-  { name: 'Floppy Disk', icon: floppyDisk },
-  { name: 'CD', icon: cd },
-  { name: 'Binary', icon: binaryPattern },
-  { name: 'Laptop', icon: laptop },
+  { name: 'Joystick', icon: joystick },
+  { name: 'Liquid Cooling', icon: liquidCooling },
+  { name: 'Microphone', icon: microphone },
+  { name: 'NAS Box', icon: nasBox },
+  { name: 'PCIe Capture Card', icon: pcieCaptureCard },
+  { name: 'Power Bank', icon: powerBank },
+  { name: 'Printer', icon: printer },
+  { name: 'SolarCell Remote', icon: solarCellRemote },
+  { name: 'SD Adapter', icon: sdAdapter },
+  { name: 'Sound Card', icon: soundCard },
+  { name: 'USB Dongle', icon: usbDongle },
+  { name: 'USB Hub', icon: usbHub },
+  { name: 'VR Headset', icon: vrHeadset },
+  { name: 'Webcam', icon: webcam },
+  { name: 'WiFi Router', icon: wifiRouter },
 ];
 
 // --- Game Modes ---
@@ -51,16 +69,18 @@ function getPreviewTime(level) {
 
 // --- Shared pairs/grid curve ---
 function getPairsAndGrid(level) {
-  if (level === 1) return { pairs: 2, gridClass: 'grid-cols-2' };
-  if (level === 2) return { pairs: 3, gridClass: 'grid-cols-3' };
-  return { pairs: 6, gridClass: 'grid-cols-4' };
+  if (level === 1) return { pairs: 2, gridClass: 'grid-cols-2', timeLimit: 15 };
+  if (level === 2) return { pairs: 3, gridClass: 'grid-cols-2', timeLimit: 20 };
+  if (level === 3) return { pairs: 6, gridClass: 'grid-cols-3', timeLimit: 35 };
+  if (level === 4) return { pairs: 10, gridClass: 'grid-cols-4', timeLimit: 55 };
+  return { pairs: 12, gridClass: 'grid-cols-4', timeLimit: 65 };
 }
 
 // --- Level Config ---
 export function getLevelConfig(level, mode = GAME_MODES.ENDLESS) {
-  const { pairs, gridClass } = getPairsAndGrid(level);
+  const { pairs, gridClass, timeLimit } = getPairsAndGrid(level);
   const previewTime = getPreviewTime(level);
-  const base = { pairs, gridClass, previewTime };
+  const base = { pairs, gridClass, previewTime, timeLimit };
 
   if (mode === GAME_MODES.SURVIVOR) {
     return {
