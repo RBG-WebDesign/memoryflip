@@ -1,8 +1,17 @@
-import am9c1 from '../assets/icons/AM9C1.png';
-import gddr7 from '../assets/icons/GDDR7.png';
-import hbm4 from '../assets/icons/HBM4.png';
-import lpddr5x from '../assets/icons/LPDDR5X.png';
-import pm1763 from '../assets/icons/PM1763.png';
+// Samsung product icons (11 items — randomly selected each round)
+import am9c1 from '../assets/icons/SAMSUNG_PRODUCTS/am9c1.png';
+import autoUfs31 from '../assets/icons/SAMSUNG_PRODUCTS/auto-ufs-31.png';
+import autoUfs41 from '../assets/icons/SAMSUNG_PRODUCTS/auto-ufs-41.png';
+import detachableSsd from '../assets/icons/SAMSUNG_PRODUCTS/detachable-ssd.png';
+import gddr7 from '../assets/icons/SAMSUNG_PRODUCTS/gddr7.png';
+import hbm4 from '../assets/icons/SAMSUNG_PRODUCTS/hbm4.png';
+import hbm4e from '../assets/icons/SAMSUNG_PRODUCTS/hbm4e.png';
+import lpddr5x from '../assets/icons/SAMSUNG_PRODUCTS/lpddr5x.png';
+import pm1753 from '../assets/icons/SAMSUNG_PRODUCTS/pm1753.png';
+import pm1763 from '../assets/icons/SAMSUNG_PRODUCTS/pm1763.png';
+import pm9e1 from '../assets/icons/SAMSUNG_PRODUCTS/pm9e1.png';
+
+// Decoy icons
 import desktopSpeaker from '../assets/icons/desktop-speaker.png';
 import ethernetPlug from '../assets/icons/ethernet-plug.png';
 import externalHardDrive from '../assets/icons/external-hard-drive.png';
@@ -23,12 +32,23 @@ import vrHeadset from '../assets/icons/vr-headset.png';
 import webcam from '../assets/icons/webcam.png';
 import wifiRouter from '../assets/icons/wifi-router.png';
 
-export const ALL_ICONS = [
+// Samsung products pool (11 items — game randomly picks from these each round)
+export const SAMSUNG_PRODUCTS = [
   { name: 'AM9C1', icon: am9c1 },
+  { name: 'Auto UFS 3.1', icon: autoUfs31 },
+  { name: 'Auto UFS 4.1', icon: autoUfs41 },
+  { name: 'Detachable SSD', icon: detachableSsd },
   { name: 'GDDR7', icon: gddr7 },
   { name: 'HBM4', icon: hbm4 },
+  { name: 'HBM4E', icon: hbm4e },
   { name: 'LPDDR5X', icon: lpddr5x },
+  { name: 'PM1753', icon: pm1753 },
   { name: 'PM1763', icon: pm1763 },
+  { name: 'PM9E1', icon: pm9e1 },
+];
+
+// Decoy icons pool (19 items)
+export const DECOY_ICONS = [
   { name: 'Desktop Speaker', icon: desktopSpeaker },
   { name: 'Ethernet Plug', icon: ethernetPlug },
   { name: 'External Hard Drive', icon: externalHardDrive },
@@ -50,25 +70,37 @@ export const ALL_ICONS = [
   { name: 'WiFi Router', icon: wifiRouter },
 ];
 
-// --- Game Modes ---
-export const GAME_MODES = {
-  TIMED: 'TIMED',
-  SURVIVOR: 'SURVIVOR',
-};
+// Combined list of all icons
+export const ALL_ICONS = [...SAMSUNG_PRODUCTS, ...DECOY_ICONS];
 
-// --- Grand Prize threshold ---
-// Players must reach this total score to qualify for a grand prize (JBL speakers).
-// Set extremely high — requires near-perfect play through 7+ levels.
-export const GRAND_PRIZE_THRESHOLD = 10000;
+// --- Round Configuration (8 rounds) ---
+// Shuffle speed = duration of each swap animation in ms
+// Shuffle pause = pause between consecutive swaps in ms
+export const ROUND_CONFIG = [
+  { round: 1, rows: 2, cols: 3, samsungCount: 1, taps: 2, revealTime: 4000, selectionTime: 8,  swapCount: [3, 4],   swapDuration: 600, swapPause: 400, pointsPerProduct: 50  },
+  { round: 2, rows: 3, cols: 3, samsungCount: 2, taps: 3, revealTime: 4000, selectionTime: 8,  swapCount: [4, 6],   swapDuration: 450, swapPause: 250, pointsPerProduct: 75  },
+  { round: 3, rows: 3, cols: 4, samsungCount: 3, taps: 4, revealTime: 4000, selectionTime: 8,  swapCount: [8, 10],  swapDuration: 300, swapPause: 150, pointsPerProduct: 100 },
+  { round: 4, rows: 4, cols: 4, samsungCount: 4, taps: 5, revealTime: 4000, selectionTime: 7,  swapCount: [8, 10],  swapDuration: 250, swapPause: 100, pointsPerProduct: 150 },
+  { round: 5, rows: 4, cols: 5, samsungCount: 5, taps: 6, revealTime: 5000, selectionTime: 6,  swapCount: [12, 14], swapDuration: 200, swapPause: 80,  pointsPerProduct: 200 },
+  { round: 6, rows: 4, cols: 5, samsungCount: 5, taps: 6, revealTime: 5000, selectionTime: 5,  swapCount: [14, 16], swapDuration: 160, swapPause: 50,  pointsPerProduct: 250 },
+  { round: 7, rows: 5, cols: 5, samsungCount: 5, taps: 6, revealTime: 4000, selectionTime: 5,  swapCount: [16, 18], swapDuration: 140, swapPause: 40,  pointsPerProduct: 350 },
+  { round: 8, rows: 5, cols: 5, samsungCount: 5, taps: 5, revealTime: 4000, selectionTime: 4,  swapCount: [18, 20], swapDuration: 120, swapPause: 30,  pointsPerProduct: 500 },
+];
 
-// Max winners per day — once reached, the grand prize tracker hides for the rest of the day.
+// --- Prize Tiers ---
+export const PRIZE_TIERS = [
+  { threshold: 200, name: 'Animal Keychain', tier: 'keychain' },
+  { threshold: 1500, name: 'Grand Prize', tier: 'grand' },
+];
+
+// --- Grand Prize ---
+export const GRAND_PRIZE_THRESHOLD = 1500;
 export const GRAND_PRIZE_DAILY_MAX = 2;
 
-// --- Grand Prize daily winner helpers ---
 const GP_STORAGE_KEY = 'galaxy-sync-grand-prize-winners';
 
 function getTodayKey() {
-  return new Date().toISOString().slice(0, 10); // "YYYY-MM-DD"
+  return new Date().toISOString().slice(0, 10);
 }
 
 export function getGrandPrizeWinnersToday() {
@@ -121,49 +153,10 @@ export function setGrandPrizeDisabled(disabled) {
   } catch { /* ignore */ }
 }
 
-// --- Shared preview-time curve ---
-// Shorter previews = harder memorization, especially on later levels
-function getPreviewTime(level) {
-  if (level === 1) return 3500;
-  if (level === 2) return 3000;
-  if (level === 3) return 2800;
-  if (level === 4) return 2200;
-  if (level === 5) return 1800;
-  const adjusted = level - 5;
-  return Math.max(1200, 1800 - adjusted * 100);
+// Helper: get a random swap count within the round's range
+export function getSwapCount(round) {
+  const config = ROUND_CONFIG[round - 1];
+  if (!config) return 4;
+  const [min, max] = config.swapCount;
+  return min + Math.floor(Math.random() * (max - min + 1));
 }
-
-// --- Shared pairs/grid curve ---
-function getPairsAndGrid(level) {
-  if (level === 1) return { pairs: 2, gridClass: 'grid-cols-2', timeLimit: 12 };
-  if (level === 2) return { pairs: 3, gridClass: 'grid-cols-2', timeLimit: 15 };
-  if (level === 3) return { pairs: 6, gridClass: 'grid-cols-3', timeLimit: 28 };
-  if (level === 4) return { pairs: 10, gridClass: 'grid-cols-4', timeLimit: 40 };
-  return { pairs: 12, gridClass: 'grid-cols-4', timeLimit: 45 };
-}
-
-// --- Level Config ---
-export function getLevelConfig(level, mode = GAME_MODES.TIMED) {
-  const { pairs, gridClass, timeLimit } = getPairsAndGrid(level);
-  const previewTime = getPreviewTime(level);
-  const base = { pairs, gridClass, previewTime, timeLimit };
-
-  if (mode === GAME_MODES.SURVIVOR) {
-    return {
-      ...base,
-      maxHealth: 100,
-      damagePerMiss: Math.min(18 + (level - 1) * 2, 30),
-    };
-  }
-
-  return base;
-}
-
-// Legacy lookup — keeps old references working during transition
-export const LEVEL_CONFIG = new Proxy({}, {
-  get(_, key) {
-    const level = parseInt(key, 10);
-    if (!isNaN(level)) return getLevelConfig(level);
-    return undefined;
-  },
-});

@@ -1,32 +1,72 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { Trophy, Play, Volume2, VolumeX, Home, Settings, X, Music, Zap, Heart, Shield } from 'lucide-react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { Trophy, Play, Volume2, VolumeX, Home, Settings, X, Music, Zap, Target, Eye, Shuffle, Lock, Shield, Trash2, RotateCcw } from 'lucide-react';
 import SpaceBackground from './components/background/SpaceBackground';
-import LevelCompleteScreen from './components/LevelCompleteScreen';
-import { ALL_ICONS, LEVEL_CONFIG, GAME_MODES, getLevelConfig, GRAND_PRIZE_THRESHOLD, isGrandPrizeAvailable, addGrandPrizeWinner, resetGrandPrizeToday, isGrandPrizeDisabled, setGrandPrizeDisabled, getGrandPrizeWinnersToday, GRAND_PRIZE_DAILY_MAX } from './constants/config';
+import RoundCompleteScreen from './components/LevelCompleteScreen';
+import { ALL_ICONS, SAMSUNG_PRODUCTS, DECOY_ICONS, ROUND_CONFIG, PRIZE_TIERS, addGrandPrizeWinner, resetGrandPrizeToday, isGrandPrizeDisabled, setGrandPrizeDisabled, getGrandPrizeWinnersToday, GRAND_PRIZE_DAILY_MAX, getSwapCount } from './constants/config';
 import GrandPrizeScreen from './components/GrandPrizeScreen';
-import { playSound, initAudio, startMusic, stopMusic, setMusicVolume, setSfxVolume, distortAndStopMusic, playGameOverJingle } from './utils/audio';
-import { shuffleArray, formatTime } from './utils/helpers';
+import { playSound, initAudio, startMusic, stopMusic, setMusicVolume, setSfxVolume } from './utils/audio';
+import { shuffleArray } from './utils/helpers';
+import { fetchLeaderboard, addLeaderboardEntry, clearLeaderboard, fetchGrandPrizeToday, addGrandPrizeWinnerRemote, resetGrandPrizeTodayRemote } from './utils/api';
 import samsungLogo from './assets/logo/Samsung_Orig_Wordmark_WHITE_RGB.png';
+import memoryFlipLogo from './assets/logo/memory-flip-logo.png';
+import memoryFlipIntro from './assets/logo/memory-flip-intro.webm';
+import memoryFlipLoop from './assets/logo/memory-flip-loop.webm';
 import cardMetallicBase from './assets/cards/card-metallic-base.svg';
 import cardMetallicSheen from './assets/cards/card-metallic-sheen.webm';
 import cardSemiconductorGold from './assets/cards/card-semiconductor-gold.svg';
 
+// ─── Shuffle Sequence Generator ───
+// Generates pairwise swap sequence, ensuring every Samsung card is swapped at least once
+function generateShuffleSequence(totalCards, swapCount, samsungGridIndices) {
+  const swaps = [];
+
+  // First, ensure each Samsung card gets swapped at least once
+  const shuffledSamsung = shuffleArray([...samsungGridIndices]);
+  for (const idx of shuffledSamsung) {
+    let partner;
+    do {
+      partner = Math.floor(Math.random() * totalCards);
+    } while (partner === idx);
+    swaps.push([idx, partner]);
+  }
+
+  // Fill remaining swaps randomly
+  while (swaps.length < swapCount) {
+    const a = Math.floor(Math.random() * totalCards);
+    let b;
+    do {
+      b = Math.floor(Math.random() * totalCards);
+    } while (b === a);
+    swaps.push([a, b]);
+  }
+
+  return shuffleArray(swaps);
+}
+
 export default function App() {
+  // ─── Core Game State ───
   const [gameState, setGameState] = useState('SPLASH');
-  const [level, setLevel] = useState(1);
+  const [round, setRound] = useState(1);
   const [deck, setDeck] = useState([]);
-  const [flippedIndices, setFlippedIndices] = useState([]);
-  const [mismatchedIndices, setMismatchedIndices] = useState([]);
-  const [matches, setMatches] = useState(0);
   const [score, setScore] = useState(0);
-  const [combo, setCombo] = useState(0);
-  const [time, setTime] = useState(0);
+  const [roundScore, setRoundScore] = useState(0);
+  const [tapsRemaining, setTapsRemaining] = useState(0);
+  const [correctTaps, setCorrectTaps] = useState(0);
+  const [wrongTaps, setWrongTaps] = useState(0);
+  const [selectionTimer, setSelectionTimer] = useState(0);
   const [isLocked, setIsLocked] = useState(false);
   const [isEntering, setIsEntering] = useState(false);
-  const [isFlippingDown, setIsFlippingDown] = useState(false);
-  const [previewCountdown, setPreviewCountdown] = useState(null);
-  const [isCelebrating, setIsCelebrating] = useState(false);
   const [isTransitioning, setIsTransitioning] = useState(false);
+  const [isCelebrating, setIsCelebrating] = useState(false);
+
+  // ─── Shuffle State ───
+  const [shuffleSwaps, setShuffleSwaps] = useState([]);
+  const [shuffleStep, setShuffleStep] = useState(-1);
+
+  // ─── Reveal State ───
+  const [revealCountdown, setRevealCountdown] = useState(null);
+
+  // ─── UI State ───
   const [leaderboard, setLeaderboard] = useState(() => {
     try {
       const saved = localStorage.getItem('galaxy-sync-leaderboard');
@@ -34,70 +74,141 @@ export default function App() {
     } catch { return []; }
   });
   const [isMuted, setIsMuted] = useState(false);
-  const [isScattering, setIsScattering] = useState(false);
-  const [scoreAtLevelStart, setScoreAtLevelStart] = useState(0);
   const [showSettings, setShowSettings] = useState(false);
   const [musicVol, setMusicVol] = useState(0.75);
   const [sfxVol, setSfxVol] = useState(0.7);
   const [audioReady, setAudioReady] = useState(false);
-  const [gameMode, setGameMode] = useState(GAME_MODES.TIMED);
-  const [leaderboardTab, setLeaderboardTab] = useState(GAME_MODES.TIMED);
-  const [health, setHealth] = useState(100);
-  const [maxHealth, setMaxHealth] = useState(100);
-  const [tookDamage, setTookDamage] = useState(false);
   const [playerName, setPlayerName] = useState('');
   const [rankRevealData, setRankRevealData] = useState(null);
   const [displayRank, setDisplayRank] = useState(0);
+  const [scoreAtRoundStart, setScoreAtRoundStart] = useState(0);
   const [gpDisabled, setGpDisabled] = useState(() => isGrandPrizeDisabled());
   const [gpWinnersToday, setGpWinnersToday] = useState(() => getGrandPrizeWinnersToday().length);
+  const [showMissedReveal, setShowMissedReveal] = useState(false);
+  const [loadProgress, setLoadProgress] = useState(0);
+  const [assetsReady, setAssetsReady] = useState(false);
 
+  // ─── Admin State ───
+  const [showAdminPanel, setShowAdminPanel] = useState(false);
+  const [adminUnlocked, setAdminUnlocked] = useState(false);
+  const [adminPin, setAdminPin] = useState('');
+  const [adminPinError, setAdminPinError] = useState(false);
+  const [adminBusy, setAdminBusy] = useState(false);
+  const [adminMsg, setAdminMsg] = useState('');
+
+  // ─── Refs ───
   const timerRef = useRef(null);
-  const mismatchTimeoutRef = useRef(null);
   const rankAnimRef = useRef(null);
   const enterKeyRef = useRef(0);
   const bgRef = useRef(null);
-  const scatterDirsRef = useRef([]);
   const pendingScoreRef = useRef(null);
   const playerRowRef = useRef(null);
+  const scoreRef = useRef(score);
+  const roundRef = useRef(round);
+  const gridMeasureRef = useRef(null);
+  const shuffleTimeoutRef = useRef(null);
+  const roundEndHandledRef = useRef(false);
   const prefersReducedMotion = useRef(
     typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
   );
 
-  const generateScatterDirs = (count) => {
-    scatterDirsRef.current = Array.from({ length: count }, () => {
-      const angle = Math.random() * Math.PI * 2;
-      const dist = 180 + Math.random() * 120;
-      return {
-        x: Math.cos(angle) * dist,
-        y: Math.sin(angle) * dist,
-        rot: (Math.random() - 0.5) * 60,
-      };
+  useEffect(() => { scoreRef.current = score; }, [score]);
+  useEffect(() => { roundRef.current = round; }, [round]);
+
+  // ─── Asset Preloader ───
+  useEffect(() => {
+    let cancelled = false;
+    const assets = [];
+
+    // All icon images
+    ALL_ICONS.forEach(({ icon }) => assets.push({ type: 'image', src: icon }));
+    // Logo / UI images
+    assets.push({ type: 'image', src: samsungLogo });
+    assets.push({ type: 'image', src: memoryFlipLogo });
+    assets.push({ type: 'image', src: cardMetallicBase });
+    assets.push({ type: 'image', src: cardSemiconductorGold });
+    // Videos
+    assets.push({ type: 'video', src: memoryFlipIntro });
+    assets.push({ type: 'video', src: memoryFlipLoop });
+    assets.push({ type: 'video', src: cardMetallicSheen });
+
+    let loaded = 0;
+    const total = assets.length;
+
+    const tick = () => {
+      loaded++;
+      if (!cancelled) setLoadProgress(Math.round((loaded / total) * 100));
+    };
+
+    const promises = assets.map(({ type, src }) => {
+      if (type === 'image') {
+        return new Promise((resolve) => {
+          const img = new Image();
+          img.onload = img.onerror = () => { tick(); resolve(); };
+          img.src = src;
+        });
+      }
+      // video — fetch the whole blob so it's in browser cache
+      return fetch(src)
+        .then(r => r.blob())
+        .catch(() => {})
+        .finally(() => tick());
     });
-  };
+
+    Promise.all(promises).then(() => {
+      if (!cancelled) {
+        setLoadProgress(100);
+        setAssetsReady(true);
+      }
+    });
+
+    return () => { cancelled = true; };
+  }, []);
 
   const MAX_LEADERBOARD_ENTRIES = 500;
 
-  const saveScore = useCallback((finalScore, mode, lvl, name) => {
+  // ─── Fetch leaderboard + grand prize from cloud on mount ───
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const cloud = await fetchLeaderboard();
+        if (!cancelled && cloud.length > 0) setLeaderboard(cloud);
+      } catch { /* fallback is already in localStorage init */ }
+      try {
+        const gp = await fetchGrandPrizeToday();
+        if (!cancelled) setGpWinnersToday(gp.length);
+      } catch { /* keep localStorage count */ }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // ─── Current round config ───
+  const roundConfig = useMemo(() => ROUND_CONFIG[round - 1] || ROUND_CONFIG[0], [round]);
+
+  // ─── Save Score ───
+  const saveScore = useCallback((finalScore, rnd, name) => {
+    const safeName = name || 'Anonymous';
     setLeaderboard(prev => {
       const entry = {
-        name: name || 'Anonymous',
+        name: safeName,
         score: finalScore,
         date: new Date().toLocaleDateString(),
-        mode: mode || GAME_MODES.TIMED,
-        level: lvl || 1,
+        round: rnd || 1,
       };
       return [...prev, entry].sort((a, b) => b.score - a.score).slice(0, MAX_LEADERBOARD_ENTRIES);
     });
+    // Also persist to cloud (fire-and-forget)
+    addLeaderboardEntry(safeName, finalScore, rnd || 1).catch(() => {});
   }, []);
 
+  // ─── Transition Helper ───
   const triggerTransition = useCallback((actionFn, warpType) => {
     setIsTransitioning(true);
     if (warpType === 'start') bgRef.current?.startGame();
     else if (warpType === 'next') bgRef.current?.nextRound();
     else if (warpType === 'menu') bgRef.current?.returnToMenu();
-    // Stop menu music immediately when starting the game
     if (warpType === 'start') stopMusic();
-    // Play deep woosh when warp shader accelerates (not on menu return)
     if (warpType === 'start' || warpType === 'next') {
       playSound('warpWoosh', isMuted);
     }
@@ -105,118 +216,369 @@ export default function App() {
     setTimeout(() => { setIsTransitioning(false); }, 1300);
   }, [isMuted]);
 
-  const setupLevel = useCallback((targetLevel, mode) => {
-    const activeMode = mode ?? gameMode;
+  // ─── Setup Round ───
+  const setupRound = useCallback((targetRound) => {
     initAudio();
     setAudioReady(true);
-    if (mismatchTimeoutRef.current) { clearTimeout(mismatchTimeoutRef.current); mismatchTimeoutRef.current = null; }
-    const config = getLevelConfig(targetLevel, activeMode);
-    // Pick random icons each level for variety
-    const selectedIcons = shuffleArray([...ALL_ICONS]).slice(0, config.pairs);
-    const newDeck = shuffleArray([...selectedIcons, ...selectedIcons])
-      .map((item) => ({ ...item, id: Math.random(), isMatched: false, isFlipped: true }));
-    setLevel(targetLevel);
+    const config = ROUND_CONFIG[targetRound - 1];
+    if (!config) return;
+
+    const totalCards = config.rows * config.cols;
+    const samsungCards = shuffleArray([...SAMSUNG_PRODUCTS]).slice(0, config.samsungCount);
+    const decoysNeeded = totalCards - config.samsungCount;
+    const shuffledDecoys = shuffleArray([...DECOY_ICONS]);
+    const decoyCards = [];
+    for (let i = 0; i < decoysNeeded; i++) {
+      decoyCards.push(shuffledDecoys[i % shuffledDecoys.length]);
+    }
+
+    const newDeck = shuffleArray([
+      ...samsungCards.map(icon => ({ ...icon, isSamsung: true })),
+      ...decoyCards.map(icon => ({ ...icon, isSamsung: false })),
+    ]).map((card, i) => ({
+      ...card,
+      id: Math.random(),
+      isFlipped: false,
+      isFound: false,
+      isWrong: false,
+      isMissed: false,
+      gridIndex: i,
+    }));
+
+    setRound(targetRound);
     setDeck(newDeck);
-    setFlippedIndices([]);
-    setMismatchedIndices([]);
-    setMatches(0);
-    setCombo(0);
-    setTime(config.timeLimit ?? 60);
+    setRoundScore(0);
+    setCorrectTaps(0);
+    setWrongTaps(0);
+    setTapsRemaining(config.taps);
+    setSelectionTimer(config.selectionTime);
     setIsLocked(true);
     setIsEntering(true);
-    setIsFlippingDown(false);
-    setPreviewCountdown(null);
+    setShuffleSwaps([]);
+    setShuffleStep(-1);
+    setRevealCountdown(null);
+    setShowMissedReveal(false);
+    setIsCelebrating(false);
+    roundEndHandledRef.current = false;
     enterKeyRef.current += 1;
-    if (activeMode === GAME_MODES.SURVIVOR) {
-      setMaxHealth(config.maxHealth ?? 100);
-      if (targetLevel === 1) setHealth(config.maxHealth ?? 100);
-    }
-    setGameState('PREVIEW');
-  }, [gameMode]);
+    setGameState('DEAL');
+  }, []);
 
+  // ─── DEAL → REVEAL: After cards enter, reveal Samsung products ───
   useEffect(() => {
-    if (!isEntering) return;
-    const config = LEVEL_CONFIG[level];
-    const cardCount = config.pairs * 2;
+    if (gameState !== 'DEAL' || !isEntering) return;
+    const config = ROUND_CONFIG[round - 1];
+    const cardCount = config.rows * config.cols;
     const enterDuration = (cardCount * 60) + 500 + 100;
     const timer = setTimeout(() => {
       setIsEntering(false);
+      setDeck(prev => prev.map(card => ({
+        ...card,
+        isFlipped: card.isSamsung,
+      })));
+      playSound('reveal', isMuted);
+      setGameState('REVEAL');
+      const revealSeconds = Math.round(config.revealTime / 1000);
+      setRevealCountdown(revealSeconds);
     }, enterDuration);
     return () => clearTimeout(timer);
-  }, [isEntering, level]);
+  }, [gameState, isEntering, round, isMuted]);
+
+  // ─── REVEAL countdown ───
+  const shuffleStartRef = useRef(null);
 
   useEffect(() => {
-    if (gameState !== 'PREVIEW' || isEntering) return;
-    const config = LEVEL_CONFIG[level];
-    const totalSeconds = Math.round(config.previewTime / 1000);
-    setPreviewCountdown(totalSeconds);
+    if (gameState !== 'REVEAL' || revealCountdown === null) return;
+    if (revealCountdown <= 0) {
+      // Flip all cards face-down and transition to SHUFFLING
+      setDeck(prev => prev.map(card => ({ ...card, isFlipped: false })));
+      playSound('go', isMuted);
+      setRevealCountdown(null);
+      // Use a ref-based timeout so cleanup from revealCountdown change won't cancel it
+      if (shuffleStartRef.current) clearTimeout(shuffleStartRef.current);
+      shuffleStartRef.current = setTimeout(() => {
+        shuffleStartRef.current = null;
+        setDeck(prevDeck => {
+          const config = ROUND_CONFIG[round - 1];
+          const totalCards = config.rows * config.cols;
+          const samIndices = prevDeck.filter(c => c.isSamsung).map(c => c.gridIndex);
+          const swapCount = getSwapCount(round);
+          const swaps = generateShuffleSequence(totalCards, swapCount, samIndices);
+          setShuffleSwaps(swaps);
+          setShuffleStep(0);
+          setGameState('SHUFFLING');
+          playSound('roundStart', isMuted);
+          return prevDeck;
+        });
+      }, 500);
+      return;
+    }
     const interval = setInterval(() => {
-      setPreviewCountdown(prev => {
-        if (prev === null) return null;
+      setRevealCountdown(prev => {
+        if (prev === null || prev <= 0) return prev;
         const next = prev - 1;
-        if (next > 0) {
-          playSound('countdown', isMuted);
-          return next;
-        }
-        clearInterval(interval);
-        return 0;
+        if (next > 0) playSound('countdown', isMuted);
+        return next;
       });
     }, 1000);
     return () => clearInterval(interval);
-  }, [gameState, isEntering, level, isMuted]);
+  }, [gameState, revealCountdown, round, isMuted]);
 
+  // Clean up shuffle start timer on unmount or game state change away from REVEAL
   useEffect(() => {
-    if (previewCountdown !== 0 || gameState !== 'PREVIEW') return;
-    playSound('go', isMuted);
-    setIsFlippingDown(true);
-    const flipTimer = setTimeout(() => {
-      setDeck(prev => prev.map(card => ({ ...card, isFlipped: false })));
-      setIsFlippingDown(false);
-      setPreviewCountdown(null);
-      setIsLocked(false);
-      setGameState('PLAYING');
-    }, 300);
-    return () => clearTimeout(flipTimer);
-  }, [previewCountdown, gameState, isMuted]);
+    return () => {
+      if (shuffleStartRef.current) {
+        clearTimeout(shuffleStartRef.current);
+        shuffleStartRef.current = null;
+      }
+    };
+  }, [gameState]);
 
-  // --- Persist leaderboard to localStorage ---
+  // ─── SHUFFLING: Execute swaps sequentially with visual animation ───
+  useEffect(() => {
+    if (gameState !== 'SHUFFLING' || shuffleStep < 0) return;
+    if (shuffleStep >= shuffleSwaps.length) {
+      // All swaps done, move to selection
+      setIsLocked(false);
+      setGameState('SELECTION');
+      return;
+    }
+
+    const config = ROUND_CONFIG[round - 1];
+    const [posA, posB] = shuffleSwaps[shuffleStep];
+
+    playSound('shuffle', isMuted);
+
+    // Reduced motion: instant swap, no animation
+    if (prefersReducedMotion.current) {
+      setDeck(prev => {
+        const newDeck = prev.map(c => ({ ...c }));
+        const cardAtA = newDeck.find(c => c.gridIndex === posA);
+        const cardAtB = newDeck.find(c => c.gridIndex === posB);
+        if (cardAtA && cardAtB) {
+          cardAtA.gridIndex = posB;
+          cardAtB.gridIndex = posA;
+        }
+        return newDeck;
+      });
+      shuffleTimeoutRef.current = setTimeout(() => {
+        setShuffleStep(prev => prev + 1);
+      }, config.swapPause);
+      return () => { if (shuffleTimeoutRef.current) clearTimeout(shuffleTimeoutRef.current); };
+    }
+
+    // Find the two card DOM elements by gridIndex
+    const gridEl = gridMeasureRef.current;
+    const elA = gridEl?.querySelector(`[data-grid-index="${posA}"]`);
+    const elB = gridEl?.querySelector(`[data-grid-index="${posB}"]`);
+
+    if (!elA || !elB) {
+      // Fallback: instant swap
+      setDeck(prev => {
+        const newDeck = prev.map(c => ({ ...c }));
+        const cardAtA = newDeck.find(c => c.gridIndex === posA);
+        const cardAtB = newDeck.find(c => c.gridIndex === posB);
+        if (cardAtA && cardAtB) { cardAtA.gridIndex = posB; cardAtB.gridIndex = posA; }
+        return newDeck;
+      });
+      shuffleTimeoutRef.current = setTimeout(() => {
+        setShuffleStep(prev => prev + 1);
+      }, config.swapPause);
+      return () => { if (shuffleTimeoutRef.current) clearTimeout(shuffleTimeoutRef.current); };
+    }
+
+    // 1. Measure current positions
+    const rectA = elA.getBoundingClientRect();
+    const rectB = elB.getBoundingClientRect();
+    const dx = rectB.left - rectA.left;
+    const dy = rectB.top - rectA.top;
+
+    // 2. Apply transition + transform to slide cards
+    const duration = config.swapDuration;
+    const easing = 'cubic-bezier(0.22, 1, 0.36, 1)';
+
+    elA.style.transition = `transform ${duration}ms ${easing}`;
+    elB.style.transition = `transform ${duration}ms ${easing}`;
+    elA.style.zIndex = '11';
+    elB.style.zIndex = '10';
+
+    // Force reflow so transition property is registered
+    void elA.offsetWidth;
+
+    elA.style.transform = `translate(${dx}px, ${dy}px)`;
+    elB.style.transform = `translate(${-dx}px, ${-dy}px)`;
+
+    // 3. After animation completes, clean up and swap gridIndex
+    shuffleTimeoutRef.current = setTimeout(() => {
+      requestAnimationFrame(() => {
+        // Remove inline styles
+        elA.style.transition = '';
+        elA.style.transform = '';
+        elA.style.zIndex = '';
+        elB.style.transition = '';
+        elB.style.transform = '';
+        elB.style.zIndex = '';
+
+        // Update gridIndex so React re-renders cards in swapped positions
+        setDeck(prev => {
+          const newDeck = prev.map(c => ({ ...c }));
+          const cardAtA = newDeck.find(c => c.gridIndex === posA);
+          const cardAtB = newDeck.find(c => c.gridIndex === posB);
+          if (cardAtA && cardAtB) {
+            cardAtA.gridIndex = posB;
+            cardAtB.gridIndex = posA;
+          }
+          return newDeck;
+        });
+
+        // Pause, then next step
+        shuffleTimeoutRef.current = setTimeout(() => {
+          setShuffleStep(prev => prev + 1);
+        }, config.swapPause);
+      });
+    }, duration);
+
+    return () => {
+      if (shuffleTimeoutRef.current) clearTimeout(shuffleTimeoutRef.current);
+      // Clean up inline styles if interrupted mid-animation
+      if (elA) { elA.style.transition = ''; elA.style.transform = ''; elA.style.zIndex = ''; }
+      if (elB) { elB.style.transition = ''; elB.style.transform = ''; elB.style.zIndex = ''; }
+    };
+  }, [gameState, shuffleStep, shuffleSwaps, round, isMuted]);
+
+  // ─── SELECTION timer countdown ───
+  useEffect(() => {
+    if (gameState !== 'SELECTION') return;
+    timerRef.current = setInterval(() => {
+      setSelectionTimer(prev => {
+        if (prev <= 1) {
+          clearInterval(timerRef.current);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(timerRef.current);
+  }, [gameState]);
+
+  // ─── SELECTION end conditions ───
+  useEffect(() => {
+    if (gameState !== 'SELECTION') return;
+    if (roundEndHandledRef.current) return;
+    const config = ROUND_CONFIG[round - 1];
+
+    // All Samsung products found
+    if (correctTaps >= config.samsungCount) {
+      roundEndHandledRef.current = true;
+      clearInterval(timerRef.current);
+      setIsLocked(true);
+      const isPerfect = wrongTaps === 0;
+      if (isPerfect) {
+        const bonus = Math.round(roundScore * 0.5);
+        setRoundScore(prev => prev + bonus);
+        setScore(prev => prev + bonus);
+        playSound('perfectRound', isMuted);
+      }
+      bgRef.current?.celebrate();
+      setIsCelebrating(true);
+      setTimeout(() => {
+        setIsCelebrating(false);
+        setGameState('ROUND_COMPLETE');
+      }, 2000);
+      return;
+    }
+
+    // Out of taps or time
+    if (tapsRemaining <= 0 || selectionTimer <= 0) {
+      roundEndHandledRef.current = true;
+      clearInterval(timerRef.current);
+      setIsLocked(true);
+      setShowMissedReveal(true);
+      playSound('missReveal', isMuted);
+      setDeck(prev => prev.map(card => ({
+        ...card,
+        isFlipped: card.isSamsung ? true : card.isFlipped,
+        isMissed: card.isSamsung && !card.isFound,
+      })));
+
+      setTimeout(() => {
+        setShowMissedReveal(false);
+        playSound('elimination', isMuted);
+        bgRef.current?.gameOver();
+        pendingScoreRef.current = { score: scoreRef.current, round: roundRef.current };
+        setGameState('GAME_OVER');
+      }, 2000);
+    }
+  }, [gameState, correctTaps, wrongTaps, tapsRemaining, selectionTimer, round, roundScore, isMuted]);
+
+  // ─── Card Tap Handler ───
+  const handleCardTap = useCallback((deckIndex) => {
+    if (isLocked || gameState !== 'SELECTION') return;
+    const card = deck[deckIndex];
+    if (!card || card.isFound || card.isFlipped || tapsRemaining <= 0) return;
+
+    setTapsRemaining(prev => prev - 1);
+
+    if (card.isSamsung) {
+      playSound('correctTap', isMuted);
+      bgRef.current?.correct();
+      const config = ROUND_CONFIG[round - 1];
+      const points = config.pointsPerProduct;
+      setCorrectTaps(prev => prev + 1);
+      setRoundScore(prev => prev + points);
+      setScore(prev => prev + points);
+      setDeck(prev => prev.map((c, i) =>
+        i === deckIndex ? { ...c, isFlipped: true, isFound: true } : c
+      ));
+    } else {
+      playSound('wrongTap', isMuted);
+      bgRef.current?.wrong();
+      setWrongTaps(prev => prev + 1);
+      setDeck(prev => prev.map((c, i) =>
+        i === deckIndex ? { ...c, isFlipped: true, isWrong: true } : c
+      ));
+      setTimeout(() => {
+        setDeck(prev => prev.map((c, i) =>
+          i === deckIndex ? { ...c, isFlipped: false, isWrong: false } : c
+        ));
+      }, 800);
+    }
+  }, [isLocked, gameState, deck, tapsRemaining, isMuted, round]);
+
+  // ─── Persist leaderboard ───
   useEffect(() => {
     try {
       localStorage.setItem('galaxy-sync-leaderboard', JSON.stringify(leaderboard));
     } catch (e) {
-      console.warn('Failed to save leaderboard to localStorage:', e.message);
+      console.warn('Failed to save leaderboard:', e.message);
     }
   }, [leaderboard]);
 
-  // --- Rank reveal count-up animation ---
+  // ─── Rank reveal animation ───
   useEffect(() => {
     if (gameState !== 'RANK_REVEAL' || !rankRevealData) return;
     const targetRank = rankRevealData.rank;
     if (targetRank <= 1) { setDisplayRank(targetRank); return; }
     const duration = Math.min(600 + targetRank * 4, 1500);
     const start = performance.now();
-    let lastSound = 0;
     const animate = (now) => {
       const elapsed = now - start;
       const progress = Math.min(elapsed / duration, 1);
       const eased = 1 - Math.pow(1 - progress, 3);
       const current = Math.max(1, Math.round(eased * targetRank));
       setDisplayRank(current);
-      if (now - lastSound > 80 && current < targetRank) {
-        lastSound = now;
-      }
       if (progress < 1) {
         rankAnimRef.current = requestAnimationFrame(animate);
       } else {
         rankAnimRef.current = null;
-        playSound('correct', isMuted);
+        playSound('correctTap', isMuted);
       }
     };
     rankAnimRef.current = requestAnimationFrame(animate);
     return () => { if (rankAnimRef.current) cancelAnimationFrame(rankAnimRef.current); };
   }, [gameState, rankRevealData, isMuted]);
 
-  // --- Auto-scroll to player's row in rank reveal ---
+  // ─── Auto-scroll to player row ───
   useEffect(() => {
     if (gameState !== 'RANK_REVEAL' || !rankRevealData || rankRevealData.rank > 50) return;
     const timer = setTimeout(() => {
@@ -225,7 +587,7 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [gameState, rankRevealData]);
 
-  // --- Splash screen dismiss: unlocks audio + transitions to menu with music ---
+  // ─── Splash dismiss ───
   const handleSplashDismiss = useCallback(() => {
     initAudio();
     setAudioReady(true);
@@ -233,24 +595,17 @@ export default function App() {
     if (!isMuted) startMusic('menu');
   }, [isMuted]);
 
-  // --- Music management: menu ambient plays on MENU/LEADERBOARD, stops in-game ---
+  // ─── Music management ───
   useEffect(() => {
     if (!audioReady) return;
-    if (isMuted) {
-      stopMusic();
-      return;
-    }
+    if (isMuted) { stopMusic(); return; }
 
-    // Silent screens — stop any leftover music, don't start new
     if (gameState === 'GAME_OVER' || gameState === 'NAME_INPUT' || gameState === 'RANK_REVEAL') {
       stopMusic();
       return;
     }
 
-    const isInGame = gameState === 'PREVIEW' || gameState === 'PLAYING' ||
-      gameState === 'LEVEL_COMPLETE' || gameState === 'SCATTERING' ||
-      gameState === 'GRAND_PRIZE';
-
+    const isInGame = ['DEAL', 'REVEAL', 'SHUFFLING', 'SELECTION', 'ROUND_COMPLETE', 'GRAND_PRIZE'].includes(gameState);
     if (isInGame) {
       startMusic('ingame');
     } else {
@@ -258,148 +613,78 @@ export default function App() {
     }
   }, [gameState, isMuted, audioReady]);
 
-  useEffect(() => {
-    if (gameState === 'PLAYING' && !isCelebrating) {
-      timerRef.current = setInterval(() => setTime(t => Math.max(0, t - 1)), 1000);
-    } else {
-      clearInterval(timerRef.current);
+  // ─── Handle Advance Round ───
+  const handleAdvanceRound = useCallback(() => {
+    if (round >= 8) {
+      pendingScoreRef.current = { score, round };
+      triggerTransition(() => {
+        setGameState('NAME_INPUT');
+      }, 'menu');
+      return;
     }
-    return () => clearInterval(timerRef.current);
-  }, [gameState, isCelebrating]);
+    triggerTransition(() => {
+      setScoreAtRoundStart(score);
+      setupRound(round + 1);
+    }, 'next');
+  }, [round, score, triggerTransition, setupRound]);
 
-  // Keep refs for values needed in game-over to avoid stale closures
-  const scoreRef = useRef(score);
-  const gameModeRef = useRef(gameMode);
-  const levelRef = useRef(level);
-  useEffect(() => { scoreRef.current = score; }, [score]);
-  useEffect(() => { gameModeRef.current = gameMode; }, [gameMode]);
-  useEffect(() => { levelRef.current = level; }, [level]);
-
-  // Time's up — game over
-  useEffect(() => {
-    if (gameState !== 'PLAYING' || time > 0 || isCelebrating) return;
-    if (mismatchTimeoutRef.current) { clearTimeout(mismatchTimeoutRef.current); mismatchTimeoutRef.current = null; }
-    setIsLocked(true);
+  // ─── Handle Return to Menu ───
+  const handleReturnToMenu = useCallback(() => {
+    if (shuffleTimeoutRef.current) { clearTimeout(shuffleTimeoutRef.current); shuffleTimeoutRef.current = null; }
+    clearInterval(timerRef.current);
+    if (score > 0) {
+      pendingScoreRef.current = { score, round };
+    }
     bgRef.current?.gameOver?.();
-    // Distort & slow the music, then play loser jingle and transition
-    distortAndStopMusic(() => {
-      playGameOverJingle(isMuted);
-      setTimeout(() => {
-        pendingScoreRef.current = { score: scoreRef.current, mode: gameModeRef.current, level: levelRef.current };
-        triggerTransition(() => {
-          setIsLocked(false);
-          setGameState('GAME_OVER');
-        }, 'menu');
-      }, 800);
-    });
-  }, [time, gameState, isCelebrating, triggerTransition, isMuted]);
-
-  useEffect(() => {
-    if (flippedIndices.length === 2 && !isLocked) {
-      setIsLocked(true);
-      const [firstIndex, secondIndex] = flippedIndices;
-      if (deck[firstIndex].name === deck[secondIndex].name) {
-        playSound('match', isMuted);
-        bgRef.current?.correct();
-        // Combo sound escalation
-        const nextCombo = combo + 1;
-        if (nextCombo === 2) setTimeout(() => playSound('combo2', isMuted), 200);
-        else if (nextCombo === 3) setTimeout(() => playSound('combo3', isMuted), 200);
-        else if (nextCombo >= 4) setTimeout(() => playSound('combo4plus', isMuted), 200);
-        const speedBonus = Math.min(30, Math.round(time * 0.8));
-        const comboBonus = Math.min(combo * 30, 120);
-        const pointsEarned = 100 + comboBonus + speedBonus;
-        setScore(s => s + pointsEarned);
-        setCombo(c => c + 1);
-        setMatches(m => m + 1);
-        setDeck(prev => {
-          const newDeck = [...prev];
-          newDeck[firstIndex].isMatched = true;
-          newDeck[firstIndex].isFlipped = true;
-          newDeck[secondIndex].isMatched = true;
-          newDeck[secondIndex].isFlipped = true;
-          return newDeck;
-        });
-        setFlippedIndices([]);
-        setIsLocked(false);
+    triggerTransition(() => {
+      if (pendingScoreRef.current) {
+        setGameState('NAME_INPUT');
       } else {
-        playSound('mismatch', isMuted);
-        bgRef.current?.wrong();
-        setCombo(0);
-        setScore(s => Math.max(0, s - 50));
-        setMismatchedIndices([firstIndex, secondIndex]);
-        if (gameMode === GAME_MODES.SURVIVOR) {
-          const config = getLevelConfig(level, gameMode);
-          const damage = config.damagePerMiss ?? 15;
-          setHealth(prev => Math.max(0, prev - damage));
-          setTookDamage(true);
-          setTimeout(() => setTookDamage(false), 180);
-        }
-        mismatchTimeoutRef.current = setTimeout(() => {
-          setDeck(prev => {
-            const newDeck = [...prev];
-            if (newDeck[firstIndex]) newDeck[firstIndex].isFlipped = false;
-            if (newDeck[secondIndex]) newDeck[secondIndex].isFlipped = false;
-            return newDeck;
-          });
-          setFlippedIndices([]);
-          setMismatchedIndices([]);
-          setIsLocked(false);
-        }, 1400);
+        setGameState('MENU');
       }
+    }, 'menu');
+  }, [score, round, triggerTransition]);
+
+  // ─── Grand Prize ───
+  const handleGrandPrize = useCallback(() => {
+    const name = playerName || 'Winner';
+    addGrandPrizeWinner(name);
+    addGrandPrizeWinnerRemote(name).catch(() => {});
+    setGpWinnersToday(prev => prev + 1);
+    bgRef.current?.celebrate?.();
+    setGameState('GRAND_PRIZE');
+  }, [playerName]);
+
+  const handleGrandPrizeContinue = useCallback(() => {
+    pendingScoreRef.current = { score, round };
+    triggerTransition(() => setGameState('NAME_INPUT'), 'menu');
+  }, [score, round, triggerTransition]);
+
+  // ─── Handle Name Submit ───
+  const handleNameSubmit = useCallback(() => {
+    const pending = pendingScoreRef.current;
+    if (pending) {
+      const name = playerName.trim() || 'Anonymous';
+      const newEntry = { name, score: pending.score, date: new Date().toLocaleDateString(), round: pending.round };
+      const allEntries = [...leaderboard, newEntry].sort((a, b) => b.score - a.score);
+      const rank = allEntries.findIndex(e => e === newEntry) + 1;
+      saveScore(pending.score, pending.round, name);
+      setRankRevealData({ rank, entry: newEntry });
+      pendingScoreRef.current = null;
+      setPlayerName('');
+      triggerTransition(() => setGameState('RANK_REVEAL'), 'none');
+    } else {
+      setPlayerName('');
+      triggerTransition(() => setGameState('MENU'), 'menu');
     }
-  }, [flippedIndices, deck, combo, time, isMuted, isLocked]);
+  }, [playerName, leaderboard, saveScore, triggerTransition]);
 
-  useEffect(() => {
-    if (gameState === 'PLAYING' && matches > 0 && matches === LEVEL_CONFIG[level].pairs && !isCelebrating && !isScattering) {
-      setIsCelebrating(true);
-      playSound('victory', isMuted);
-      bgRef.current?.celebrate();
-      setIsLocked(true);
-      setTimeout(() => {
-        setGameState('LEVEL_COMPLETE');
-        setIsCelebrating(false);
-      }, 2500);
-    }
-  }, [matches, level, gameState, score, saveScore, isMuted, isCelebrating, isScattering]);
-
-  // Survivor Mode: game over when health hits 0
-  useEffect(() => {
-    if (gameMode !== GAME_MODES.SURVIVOR) return;
-    if (health > 0 || gameState !== 'PLAYING') return;
-    if (mismatchTimeoutRef.current) { clearTimeout(mismatchTimeoutRef.current); mismatchTimeoutRef.current = null; }
-    setIsLocked(true);
-    bgRef.current?.gameOver?.();
-    // Distort & slow the music, then play loser jingle and transition
-    distortAndStopMusic(() => {
-      playGameOverJingle(isMuted);
-      setTimeout(() => {
-        pendingScoreRef.current = { score: scoreRef.current, mode: gameModeRef.current, level: levelRef.current };
-        triggerTransition(() => {
-          setIsLocked(false);
-          setGameState('GAME_OVER');
-        }, 'menu');
-      }, 800);
-    });
-  }, [health, gameMode, gameState, triggerTransition]);
-
-  const flippedCountRef = useRef(0);
-  useEffect(() => { flippedCountRef.current = flippedIndices.length; }, [flippedIndices]);
-
-  const handleCardClick = (index) => {
-    if (isLocked || flippedCountRef.current >= 2 || flippedIndices.length >= 2 || deck[index].isFlipped || deck[index].isMatched) return;
-    flippedCountRef.current += 1;
-    playSound('flip', isMuted);
-    setDeck(prev => {
-      const newDeck = [...prev];
-      newDeck[index].isFlipped = true;
-      return newDeck;
-    });
-    setFlippedIndices(prev => [...prev, index]);
-  };
+  // ═══════════════════════════════════════════
+  //  RENDER FUNCTIONS
+  // ═══════════════════════════════════════════
 
   const renderSplash = () => (
-    <div className="start-screen" onClick={handleSplashDismiss} style={{ cursor: 'pointer' }}>
+    <div className="start-screen" onClick={assetsReady ? handleSplashDismiss : undefined} style={{ cursor: assetsReady ? 'pointer' : 'default' }}>
       <div className="start-screen__content splash-content">
         <img
           src={samsungLogo}
@@ -407,9 +692,20 @@ export default function App() {
           className="h-8 sm:h-10 md:h-12 w-auto opacity-90 drop-shadow-[0_0_30px_rgba(255,255,255,0.2)]"
         />
         <div className="splash-continue mt-12 sm:mt-16">
-          <span className="text-[11px] sm:text-xs text-gray-400 tracking-[0.3em] uppercase animate-pulse">
-            Touch Screen to Begin
-          </span>
+          {assetsReady ? (
+            <span className="text-[11px] sm:text-xs text-gray-400 tracking-[0.3em] uppercase animate-pulse">
+              Touch Screen to Begin
+            </span>
+          ) : (
+            <div className="splash-loader">
+              <div className="splash-loader__bar">
+                <div className="splash-loader__fill" style={{ width: `${loadProgress}%` }} />
+              </div>
+              <span className="text-[10px] sm:text-[11px] text-gray-500 tracking-[0.2em] uppercase mt-2">
+                Loading {loadProgress}%
+              </span>
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -426,12 +722,42 @@ export default function App() {
           />
         </div>
         <div className="start-screen__title-section">
-          <h1 className="start-screen__title">
-            <span className="start-screen__title-game">MEMORY</span>
-            <span className="start-screen__title-flip">FLIP</span>
+          <h1 className="start-screen__title start-screen__title--logo">
+            <video
+              ref={(el) => {
+                if (!el) return;
+                el.play().catch(() => {});
+                el.onended = () => {
+                  el.style.display = 'none';
+                  const loop = el.parentElement.querySelector('.logo-video-loop');
+                  if (loop) {
+                    loop.style.display = '';
+                    loop.play().catch(() => {});
+                  }
+                };
+              }}
+              src={memoryFlipIntro}
+              poster={memoryFlipLogo}
+              width={800}
+              height={360}
+              className="logo-video"
+              muted
+              playsInline
+            />
+            <video
+              src={memoryFlipLoop}
+              width={800}
+              height={360}
+              className="logo-video logo-video-loop"
+              style={{ display: 'none' }}
+              muted
+              playsInline
+              loop
+              preload="auto"
+            />
           </h1>
           <p className="start-screen__subtitle">
-            Test your memory, beat the clock
+            Keep your eyes on the card.
           </p>
         </div>
         <div className="start-screen__divider" aria-hidden="true">
@@ -442,26 +768,22 @@ export default function App() {
         <div className="start-screen__menu">
           <button
             className="start-screen__btn start-screen__btn--primary"
-            onClick={() => { playSound('menuSelect', isMuted); setGameMode(GAME_MODES.TIMED); triggerTransition(() => { setScore(0); setCombo(0); setScoreAtLevelStart(0); setHealth(100); setMaxHealth(100); setupLevel(1, GAME_MODES.TIMED); }, 'start'); }}
+            onClick={() => {
+              playSound('menuSelect', isMuted);
+              triggerTransition(() => {
+                setScore(0);
+                setRoundScore(0);
+                setScoreAtRoundStart(0);
+                setupRound(1);
+              }, 'start');
+            }}
           >
             <span className="start-screen__btn-glow" aria-hidden="true" />
             <span className="start-screen__btn-inner">
               <span className="start-screen__btn-icon" aria-hidden="true">
                 <Play size={18} fill="currentColor" />
               </span>
-              TIMED MODE
-            </span>
-          </button>
-          <button
-            className="start-screen__btn start-screen__btn--survivor"
-            onClick={() => { playSound('menuSelect', isMuted); setGameMode(GAME_MODES.SURVIVOR); triggerTransition(() => { setScore(0); setCombo(0); setScoreAtLevelStart(0); setHealth(100); setMaxHealth(100); setupLevel(1, GAME_MODES.SURVIVOR); }, 'start'); }}
-          >
-            <span className="start-screen__btn-glow" aria-hidden="true" />
-            <span className="start-screen__btn-inner">
-              <span className="start-screen__btn-icon" aria-hidden="true">
-                <Shield size={18} />
-              </span>
-              SURVIVOR MODE
+              PLAY
             </span>
           </button>
           <button className="start-screen__btn start-screen__btn--secondary" onClick={() => { playSound('click', isMuted); initAudio(); setAudioReady(true); triggerTransition(() => setGameState('LEADERBOARD'), 'none'); }}>
@@ -474,11 +796,11 @@ export default function App() {
           </button>
         </div>
         <div className="start-screen__footer">
-          <p className="start-screen__hint">Tap to flip cards &bull; Find matching pairs &bull; Build your combo</p>
+          <p className="start-screen__hint">Watch the reveal &bull; Track through the shuffle &bull; Tap Samsung products</p>
           <div className="start-screen__badges">
-            <span className="start-screen__badge">2 Modes</span>
-            <span className="start-screen__badge">Timed Levels</span>
-            <span className="start-screen__badge">Offline Play</span>
+            <span className="start-screen__badge">8 Rounds</span>
+            <span className="start-screen__badge">Shuffle Challenge</span>
+            <span className="start-screen__badge">Grand Prize</span>
           </div>
         </div>
       </div>
@@ -516,7 +838,7 @@ export default function App() {
     );
   };
 
-  const renderLeaderboardEntry = (entry, i, isSurvivor, highlightEntry = null) => {
+  const renderLeaderboardEntry = (entry, i, highlightEntry = null) => {
     const isPlayer = highlightEntry && entry.name === highlightEntry.name && entry.score === highlightEntry.score && entry.date === highlightEntry.date;
     return (
       <div
@@ -537,7 +859,7 @@ export default function App() {
               {entry.name || 'Anonymous'}
               {isPlayer && <span className="lb-you-pill shrink-0">YOU</span>}
             </span>
-            <span className="text-[10px] sm:text-[11px] text-gray-500 mt-0.5">{entry.date}{isSurvivor && entry.level ? ` · Level ${entry.level}` : ''}</span>
+            <span className="text-[10px] sm:text-[11px] text-gray-500 mt-0.5">{entry.date}{entry.round ? ` · Round ${entry.round}` : ''}</span>
           </span>
         </div>
         <span className="font-mono font-bold text-white tracking-wider text-sm sm:text-base shrink-0 ml-3">{entry.score}<span className="text-[10px] sm:text-xs font-normal text-gray-500 ml-1">pts</span></span>
@@ -546,15 +868,12 @@ export default function App() {
   };
 
   const renderLeaderboard = () => {
-    const allFiltered = leaderboard.filter(e => (e.mode || GAME_MODES.TIMED) === leaderboardTab);
+    const allFiltered = leaderboard;
     const filtered = allFiltered.slice(0, 50);
-    const isTimed = leaderboardTab === GAME_MODES.TIMED;
-    const isSurvivor = leaderboardTab === GAME_MODES.SURVIVOR;
 
     return (
       <div className="start-screen">
         <div className="start-screen__content z-10 w-full max-w-lg lb-screen">
-          {/* Header */}
           <div className="text-center mb-5 sm:mb-6">
             <div className="lb-title-icon mb-3">
               <Trophy size={28} className="text-[#0689D8]" />
@@ -562,34 +881,15 @@ export default function App() {
             <h2 className="text-3xl sm:text-4xl md:text-5xl font-bold text-white tracking-wide mb-2">
               Top <span className="text-[#0689D8]">Scores</span>
             </h2>
-            <p className="text-gray-400 text-xs sm:text-sm tracking-[0.25em] uppercase font-medium">Ecosystem Leaders</p>
-          </div>
-
-          {/* Tab switcher */}
-          <div className="lb-tab-switcher mb-5 sm:mb-6">
-            <button
-              onClick={() => { playSound('click', isMuted); setLeaderboardTab(GAME_MODES.TIMED); }}
-              className={`lb-tab ${isTimed ? 'lb-tab--active-timed' : ''}`}
-            >
-              <Zap size={14} className="shrink-0" />
-              Timed
-            </button>
-            <button
-              onClick={() => { playSound('click', isMuted); setLeaderboardTab(GAME_MODES.SURVIVOR); }}
-              className={`lb-tab ${isSurvivor ? 'lb-tab--active-survivor' : ''}`}
-            >
-              <Shield size={14} className="shrink-0" />
-              Survivor
-            </button>
+            <p className="text-gray-400 text-xs sm:text-sm tracking-[0.25em] uppercase font-medium">Memory Flip Champions</p>
           </div>
 
           {renderPodium(allFiltered)}
 
-          {/* List panel */}
           <div className="lb-list-panel mb-5 sm:mb-6">
             {filtered.length > 3 ? (
               <div className="max-h-[45vh] sm:max-h-[380px] overflow-y-auto leaderboard-scroll space-y-1 p-1">
-                {filtered.slice(3).map((entry, i) => renderLeaderboardEntry(entry, i + 3, isSurvivor))}
+                {filtered.slice(3).map((entry, i) => renderLeaderboardEntry(entry, i + 3))}
               </div>
             ) : filtered.length > 0 ? (
               <div className="text-center text-gray-400 py-5 sm:py-6 text-sm">
@@ -598,7 +898,7 @@ export default function App() {
             ) : (
               <div className="text-center py-8 sm:py-10">
                 <div className="text-gray-600 text-2xl mb-3">🏆</div>
-                <p className="text-gray-400 text-sm font-medium mb-1">No {isSurvivor ? 'Survivor' : 'Timed'} scores yet</p>
+                <p className="text-gray-400 text-sm font-medium mb-1">No scores yet</p>
                 <p className="text-gray-600 text-xs">Play a round to claim your spot!</p>
               </div>
             )}
@@ -607,7 +907,6 @@ export default function App() {
             )}
           </div>
 
-          {/* CTA */}
           <button className="start-screen__btn start-screen__btn--secondary w-full" onClick={() => { playSound('click', isMuted); triggerTransition(() => setGameState('MENU'), 'none'); }}>
             <span className="start-screen__btn-inner">
               <span className="start-screen__btn-icon" aria-hidden="true"><Home size={18} /></span>
@@ -621,27 +920,21 @@ export default function App() {
 
   const renderRankReveal = () => {
     if (!rankRevealData) return null;
-    const { rank, entry, mode } = rankRevealData;
-    const isSurvivor = mode === GAME_MODES.SURVIVOR;
-    const allForMode = leaderboard.filter(e => (e.mode || GAME_MODES.TIMED) === mode);
-    const top50 = allForMode.slice(0, 50);
+    const { rank, entry } = rankRevealData;
+    const allSorted = [...leaderboard].sort((a, b) => b.score - a.score);
+    const top50 = allSorted.slice(0, 50);
     const inTop50 = rank <= 50;
-    const accentColor = isSurvivor ? '#ef4444' : '#0689D8';
+    const accentColor = '#0689D8';
 
     return (
       <div className="start-screen">
         <div className="start-screen__content z-10 w-full max-w-lg lb-screen">
-          {/* Header */}
           <div className="text-center mb-4 sm:mb-5">
-            <p className="text-gray-400 text-[10px] sm:text-xs tracking-[0.3em] uppercase font-medium mb-2">
-              {isSurvivor ? 'Survivor' : 'Timed'} Mode
-            </p>
             <h2 className="text-3xl sm:text-4xl md:text-5xl font-bold text-white tracking-wide">
               Your <span style={{ color: accentColor }}>Ranking</span>
             </h2>
           </div>
 
-          {/* Rank number hero */}
           <div className="rank-reveal-number rank-hero-card mb-5 sm:mb-6" style={{ '--accent': accentColor }}>
             <p className="text-gray-400 text-[10px] sm:text-xs tracking-[0.3em] uppercase mb-2 font-medium">Your Rank</p>
             <p className="rank-hero-number font-mono" style={{ color: accentColor }}>
@@ -654,13 +947,12 @@ export default function App() {
             </div>
           </div>
 
-          {renderPodium(allForMode)}
+          {renderPodium(allSorted)}
 
-          {/* Scrollable list if in top 50, otherwise motivational message */}
           {inTop50 ? (
             <div className="lb-list-panel mb-5 sm:mb-6 rank-reveal-list">
               <div className="max-h-[35vh] sm:max-h-[300px] overflow-y-auto rank-reveal-scroll space-y-1 p-1">
-                {top50.map((e, i) => renderLeaderboardEntry(e, i, isSurvivor, entry))}
+                {top50.map((e, i) => renderLeaderboardEntry(e, i, entry))}
               </div>
             </div>
           ) : (
@@ -670,7 +962,7 @@ export default function App() {
               <button
                 className="text-xs tracking-[0.2em] uppercase font-semibold transition-colors px-4 py-2 rounded-lg border border-white/10 hover:border-white/20 hover:bg-white/5"
                 style={{ color: accentColor }}
-                onClick={() => { setLeaderboardTab(mode); setRankRevealData(null); triggerTransition(() => setGameState('LEADERBOARD'), 'none'); }}
+                onClick={() => { setRankRevealData(null); triggerTransition(() => setGameState('LEADERBOARD'), 'none'); }}
               >
                 View Top 50
               </button>
@@ -692,20 +984,20 @@ export default function App() {
   };
 
   const renderHUD = () => {
-    const config = LEVEL_CONFIG[level];
-    const cardCount = (config?.pairs || 0) * 2;
+    const config = ROUND_CONFIG[round - 1];
+    const cardCount = config.rows * config.cols;
     const hudDelay = isEntering ? `${(cardCount * 60) + 200}ms` : '0ms';
+
     return (
       <header
         key={`hud-${enterKeyRef.current}`}
         className={`fixed top-0 left-0 right-0 flex items-center justify-between px-3 sm:px-6 md:px-8 py-3 sm:py-4 z-40 bg-black/50 backdrop-blur-md border-b border-white/[0.06] ${isEntering ? 'animate-hud-enter' : ''}`}
-        data-level={level}
         style={isEntering ? { animationDelay: hudDelay } : {}}
       >
-        {/* Left: Home + Status */}
+        {/* Left: Home + Round */}
         <div className="flex items-center gap-3 sm:gap-4 min-w-0">
           <button
-            onClick={() => { playSound('click', isMuted); if (mismatchTimeoutRef.current) { clearTimeout(mismatchTimeoutRef.current); mismatchTimeoutRef.current = null; } setIsLocked(false); if (score > 0) { pendingScoreRef.current = { score, mode: gameMode, level }; setGameState('NAME_INPUT'); } else { triggerTransition(() => setGameState('MENU'), 'menu'); } }}
+            onClick={() => { playSound('click', isMuted); handleReturnToMenu(); }}
             className="p-2 sm:p-2.5 text-gray-400 hover:text-white transition-colors rounded-lg hover:bg-white/[0.06] shrink-0"
             aria-label="Back to Menu"
           >
@@ -713,50 +1005,70 @@ export default function App() {
           </button>
           <div className="w-px h-6 sm:h-7 bg-white/10 shrink-0" />
           <div className="flex flex-col min-w-0">
-            <span className="text-gray-400 text-[9px] sm:text-[10px] tracking-widest uppercase leading-tight mb-0.5">Status</span>
+            <span className="text-gray-400 text-[9px] sm:text-[10px] tracking-widest uppercase leading-tight mb-0.5">Round</span>
             <span className="text-sm sm:text-base md:text-lg font-semibold truncate">
-              {gameState === 'PREVIEW' ? 'Analyzing...' : `Level ${level}`}
+              {round} / 8
             </span>
           </div>
         </div>
 
-        {/* Center: Timer/Memorize */}
+        {/* Center: Phase indicator */}
         <div className="absolute left-1/2 -translate-x-1/2 flex flex-col items-center">
-          <span className="text-gray-400 text-[9px] sm:text-[10px] tracking-widest uppercase leading-tight mb-0.5">
-            {gameState === 'PREVIEW' && previewCountdown !== null ? 'Memorize' : 'Time'}
-          </span>
-          {gameState === 'PREVIEW' && previewCountdown !== null ? (
-            <span
-              className="text-base sm:text-lg md:text-xl font-mono font-light tracking-wider text-[#00d4ff]"
-              style={{
-                textShadow: '0 0 12px rgba(0,212,255,0.7), 0 2px 8px rgba(0,0,0,0.8)',
-                opacity: previewCountdown === 0 ? 0 : 1,
-                transition: 'opacity 0.6s ease-out',
-              }}
-            >
-              {previewCountdown > 0 ? previewCountdown : '0'}
-            </span>
+          {gameState === 'REVEAL' && revealCountdown !== null ? (
+            <>
+              <span className="text-gray-400 text-[9px] sm:text-[10px] tracking-widest uppercase leading-tight mb-0.5">
+                <Eye size={10} className="inline mr-1" />Memorize
+              </span>
+              <span className="text-base sm:text-lg md:text-xl font-mono font-light tracking-wider text-[#00d4ff]"
+                style={{ textShadow: '0 0 12px rgba(0,212,255,0.7)' }}>
+                {revealCountdown}s
+              </span>
+            </>
+          ) : gameState === 'SHUFFLING' ? (
+            <>
+              <span className="text-gray-400 text-[9px] sm:text-[10px] tracking-widest uppercase leading-tight mb-0.5">
+                <Shuffle size={10} className="inline mr-1" />Shuffling
+              </span>
+              <span className="text-base sm:text-lg md:text-xl font-mono font-light tracking-wider text-yellow-400 animate-pulse">
+                Watch!
+              </span>
+            </>
+          ) : gameState === 'SELECTION' ? (
+            <>
+              <span className="text-gray-400 text-[9px] sm:text-[10px] tracking-widest uppercase leading-tight mb-0.5">
+                <Target size={10} className="inline mr-1" />Find
+              </span>
+              <span className={`text-base sm:text-lg md:text-xl font-mono font-light tracking-wider ${selectionTimer <= 3 ? 'text-red-500 animate-pulse' : 'text-[#0689D8]'}`}>
+                {selectionTimer}s
+              </span>
+            </>
           ) : (
-            <span
-              className={`text-base sm:text-lg md:text-xl font-mono font-light tracking-wider ${time <= 5 && gameState === 'PLAYING' ? 'text-red-500' : 'text-[#0689D8]'}`}
-            >
-              {formatTime(time)}
-            </span>
+            <>
+              <span className="text-gray-400 text-[9px] sm:text-[10px] tracking-widest uppercase leading-tight mb-0.5">Status</span>
+              <span className="text-base sm:text-lg md:text-xl font-mono font-light tracking-wider text-gray-500">
+                {gameState === 'DEAL' ? 'Dealing...' : '—'}
+              </span>
+            </>
           )}
         </div>
 
-        {/* Right: Score + Settings */}
+        {/* Right: Taps + Score + Settings */}
         <div className="flex items-center gap-3 sm:gap-4 min-w-0">
+          {gameState === 'SELECTION' && (
+            <div className="flex flex-col items-end min-w-0">
+              <span className="text-gray-400 text-[9px] sm:text-[10px] tracking-widest uppercase leading-tight mb-0.5">Taps</span>
+              <span className={`text-sm sm:text-base md:text-lg font-mono font-semibold ${tapsRemaining <= 1 ? 'text-red-400' : 'text-[#00d4ff]'}`}>{tapsRemaining}</span>
+            </div>
+          )}
           <div className="flex flex-col items-end min-w-0">
             <span className="text-gray-400 text-[9px] sm:text-[10px] tracking-widest uppercase leading-tight mb-0.5">Score</span>
             <span className="text-sm sm:text-base md:text-lg font-mono font-semibold">{score}</span>
           </div>
           <div className="w-px h-6 sm:h-7 bg-white/10 shrink-0" />
           <button
-            onClick={() => { playSound('click', isMuted); setShowSettings(s => { if (!s) { setGpWinnersToday(getGrandPrizeWinnersToday().length); setGpDisabled(isGrandPrizeDisabled()); } return !s; }); }}
+            onClick={() => { playSound('click', isMuted); setShowSettings(s => !s); }}
             className="p-2 sm:p-2.5 text-gray-400 hover:text-white transition-all duration-300 rounded-lg hover:bg-white/[0.06] shrink-0"
             aria-label="Settings"
-            style={{ opacity: showSettings ? 1 : undefined }}
           >
             <Settings size={18} className={`sm:w-5 sm:h-5 transition-transform duration-300 ${showSettings ? 'rotate-90' : ''}`} />
           </button>
@@ -765,49 +1077,63 @@ export default function App() {
     );
   };
 
+  // ─── Grid Rendering ───
   const renderGrid = () => {
-    const config = LEVEL_CONFIG[level];
+    const config = ROUND_CONFIG[round - 1];
+    const { rows, cols } = config;
+    const gridDataAttr = `${rows}x${cols}`;
+
+    // Sort deck by gridIndex for positional rendering
+    const sortedDeck = [...deck].sort((a, b) => a.gridIndex - b.gridIndex);
 
     return (
       <div
         key={`grid-${enterKeyRef.current}`}
-        className={`game-grid-wrapper ${isFlippingDown ? 'animate-flip-down' : ''}`}
-        data-level={Math.min(level, 5)}
+        className="game-grid-wrapper"
+        data-grid={gridDataAttr}
+        ref={gridMeasureRef}
       >
         <div
-          className={`grid ${config?.gridClass || ''} ${isCelebrating ? 'gap-3 sm:gap-5' : 'gap-2 sm:gap-3'} transition-all duration-700 ease-out`}
-          style={{ perspective: '800px' }}
+          className="grid gap-2 sm:gap-3 transition-all duration-700 ease-out"
+          style={{
+            gridTemplateColumns: `repeat(${cols}, 1fr)`,
+            gridTemplateRows: `repeat(${rows}, 1fr)`,
+            perspective: '800px',
+          }}
         >
-          {deck.map((card, index) => {
-            const isMismatched = mismatchedIndices.includes(index);
-            const scatterDir = isScattering ? scatterDirsRef.current[index] : null;
+          {sortedDeck.map((card) => {
+            const deckIndex = deck.indexOf(card);
+            const isCorrectlyFound = card.isFound;
+            const isMissed = card.isMissed && showMissedReveal;
+            const isWrongTap = card.isWrong;
+
             return (
               <div
                 key={card.id}
+                data-grid-index={card.gridIndex}
                 role="button"
-                tabIndex={isLocked || card.isMatched ? -1 : 0}
-                onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && handleCardClick(index)}
-                className={`perspective-1000 w-full cursor-pointer outline-none focus:ring-2 focus:ring-[#0689D8] group relative ${isCelebrating && !isScattering ? 'celebrate-pop' : ''} ${isEntering ? 'animate-card-enter' : ''} ${isScattering ? 'pointer-events-none' : ''}`}
+                tabIndex={isLocked || card.isFound ? -1 : 0}
+                onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && handleCardTap(deckIndex)}
+                className={`perspective-1000 w-full cursor-pointer outline-none focus:ring-2 focus:ring-[#0689D8] group relative
+                  ${isEntering ? 'animate-card-enter' : ''}
+                  ${isCelebrating && isCorrectlyFound ? 'celebrate-pop' : ''}
+                  ${isWrongTap ? 'animate-wrong-tap' : ''}
+                `}
                 data-aspect="card"
                 style={{
-                  ...(isCelebrating && !isScattering ? { animationDelay: `${(index % 4) * 0.1}s` } : {}),
-                  ...(isEntering ? { animationDelay: `${index * 60}ms` } : {}),
-                  ...(isScattering && scatterDir ? {
-                    transform: `translate(${scatterDir.x * 0.5}vw, ${scatterDir.y * 0.5}vh) rotateX(-75deg) rotate(${scatterDir.rot}deg) scale(2.5)`,
-                    opacity: 0,
-                    transition: `transform 1.4s cubic-bezier(0.16, 1, 0.3, 1) ${index * 50}ms, opacity 1.2s ease ${index * 50 + 400}ms`,
-                  } : {})
+                  ...(isEntering ? { animationDelay: `${card.gridIndex * 60}ms` } : {}),
+                  ...(isCelebrating && isCorrectlyFound ? { animationDelay: `${(card.gridIndex % 4) * 0.1}s` } : {}),
                 }}
-                onClick={() => handleCardClick(index)}
+                onClick={() => handleCardTap(deckIndex)}
               >
                 <div
                   className={`relative w-full h-full transform-style-3d breeze-transition
                     ${card.isFlipped ? 'rotate-y-180' : ''}
-                    ${isMismatched ? 'animate-mismatch' : ''}
-                    ${!card.isFlipped && !isLocked ? 'group-hover:-translate-y-1' : ''}
+                    ${isWrongTap ? 'animate-mismatch' : ''}
+                    ${!card.isFlipped && !isLocked && gameState === 'SELECTION' ? 'group-hover:-translate-y-1' : ''}
                   `}
                 >
-                  {/* Card Front — Metallic base face-down */}
+                  {/* Card Front — Metallic Samsung logo (face-down) */}
                   <div className="absolute inset-0 w-full h-full backface-hidden card-front-face overflow-hidden">
                     {prefersReducedMotion.current ? (
                       <img src={cardMetallicBase} alt="Card back" className="absolute inset-0 w-full h-full object-cover" draggable={false} />
@@ -815,11 +1141,7 @@ export default function App() {
                       <>
                         <video
                           src={cardMetallicSheen}
-                          autoPlay
-                          loop
-                          muted
-                          playsInline
-                          preload="metadata"
+                          autoPlay loop muted playsInline preload="metadata"
                           className="absolute inset-0 w-full h-full object-cover"
                           draggable={false}
                           onError={(e) => { e.target.style.display = 'none'; if (e.target.nextSibling) e.target.nextSibling.style.display = 'block'; }}
@@ -827,7 +1149,6 @@ export default function App() {
                         <img src={cardMetallicBase} alt="Card back" className="absolute inset-0 w-full h-full object-cover" style={{ display: 'none' }} draggable={false} />
                       </>
                     )}
-                    {/* Samsung logo overlay */}
                     <img
                       src={samsungLogo}
                       alt="Samsung"
@@ -835,18 +1156,26 @@ export default function App() {
                       draggable={false}
                     />
                   </div>
-                  {/* Card Back — Semiconductor gold with icon reveal */}
+                  {/* Card Back — Content reveal */}
                   <div className={`absolute inset-0 w-full h-full backface-hidden card-back-face overflow-hidden flex items-center justify-center breeze-transition
-                    ${isCelebrating && card.isMatched ? 'celebrate-glow' : card.isMatched ? 'shadow-[0_0_15px_rgba(212,162,58,0.3)]' : ''}
+                    ${isCorrectlyFound ? 'card-found-glow' : ''}
+                    ${isMissed ? 'card-missed-dim' : ''}
+                    ${isWrongTap ? 'card-wrong-flash' : ''}
+                    ${card.isSamsung && gameState === 'REVEAL' ? 'card-samsung-reveal' : ''}
                   `}>
                     <img src={cardSemiconductorGold} alt="Card face" className="absolute inset-0 w-full h-full object-cover" draggable={false} />
-                    {/* Icon on card */}
                     <img
                       src={card.icon}
                       alt={card.name}
-                      className={`card-icon relative z-10 ${card.isMatched ? 'scale-110' : ''} ${isMismatched ? 'opacity-60' : ''}`}
+                      className={`card-icon relative z-10 ${isCorrectlyFound ? 'scale-110' : ''} ${isWrongTap ? 'opacity-60' : ''}`}
                       draggable={false}
                     />
+                    {/* Product name label for Samsung products when found */}
+                    {isCorrectlyFound && card.isSamsung && (
+                      <span className="absolute bottom-1 left-0 right-0 text-center text-[8px] sm:text-[9px] text-white/80 font-semibold tracking-wider z-20 drop-shadow-[0_1px_3px_rgba(0,0,0,0.8)]">
+                        {card.name}
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>
@@ -857,25 +1186,22 @@ export default function App() {
     );
   };
 
-  const renderPreviewOverlay = () => {
-    return null;
-  };
-
-  const renderSyncBar = () => {
-    const totalPairs = LEVEL_CONFIG[level]?.pairs || 0;
-    const progressPercent = (matches / totalPairs) * 100;
-    const config = LEVEL_CONFIG[level];
-    const cardCount = (config?.pairs || 0) * 2;
+  // ─── Side progress bar ───
+  const renderSideInfo = () => {
+    if (!['DEAL', 'REVEAL', 'SHUFFLING', 'SELECTION'].includes(gameState)) return null;
+    const config = ROUND_CONFIG[round - 1];
+    const cardCount = config.rows * config.cols;
     const barDelay = isEntering ? `${(cardCount * 60) + 400}ms` : '0ms';
-    if (gameState !== 'PLAYING' && gameState !== 'PREVIEW') return null;
+    const progressPercent = (correctTaps / config.samsungCount) * 100;
+
     return (
       <div
-        key={`syncbar-${enterKeyRef.current}`}
+        key={`sideinfo-${enterKeyRef.current}`}
         className={`fixed left-3 sm:left-4 md:left-6 top-1/2 -translate-y-1/2 z-30 flex flex-col items-center gap-3 ${isEntering ? 'animate-footer-enter' : ''}`}
         style={isEntering ? { animationDelay: barDelay } : {}}
       >
         <span className="text-[9px] sm:text-[10px] text-gray-500 font-medium tracking-widest uppercase writing-mode-vertical">
-          Synced
+          Found
         </span>
         <div className="w-2 sm:w-2.5 h-48 sm:h-56 md:h-64 bg-[#1A1A1A] rounded-full overflow-hidden relative">
           <div
@@ -884,46 +1210,8 @@ export default function App() {
           />
         </div>
         <span className="text-[10px] sm:text-xs text-gray-500 font-mono font-medium">
-          {matches}/{totalPairs}
+          {correctTaps}/{config.samsungCount}
         </span>
-        {combo > 1 && (
-          <span className="text-[9px] sm:text-[10px] text-[#0689D8] font-bold animate-pulse">
-            {combo}x
-          </span>
-        )}
-      </div>
-    );
-  };
-
-  const renderHealthBar = () => {
-    if (gameMode !== GAME_MODES.SURVIVOR) return null;
-    if (gameState !== 'PLAYING' && gameState !== 'PREVIEW') return null;
-    const config = getLevelConfig(level, gameMode);
-    const cardCount = (config?.pairs || 0) * 2;
-    const barDelay = isEntering ? `${(cardCount * 60) + 400}ms` : '0ms';
-    return (
-      <div
-        key={`healthbar-${enterKeyRef.current}`}
-        className={`survivor-health-wrap ${isEntering ? 'animate-footer-enter' : ''}`}
-        style={isEntering ? { animationDelay: barDelay } : {}}
-      >
-        <span className="survivor-health-label">Health</span>
-        <div className="survivor-health-bar">
-          <div
-            className={`survivor-health-fill ${
-              health <= maxHealth * 0.25
-                ? 'critical'
-                : health <= maxHealth * 0.5
-                  ? 'warning'
-                  : ''
-            }`}
-            style={{ height: `${(health / maxHealth) * 100}%` }}
-          />
-        </div>
-        <span className="survivor-health-value">
-          {Math.ceil(health)}
-        </span>
-        <Heart size={14} className={`text-red-400 ${health <= maxHealth * 0.25 ? 'animate-pulse' : 'opacity-60'}`} />
       </div>
     );
   };
@@ -933,13 +1221,16 @@ export default function App() {
       <div className="start-screen__content z-10 w-full max-w-md">
         <div className="text-center mb-5 sm:mb-6">
           <div className="game-over-icon-ring mb-4">
-            <Heart size={36} className="text-red-400" />
+            <X size={36} className="text-red-400" />
           </div>
           <h2 className="text-3xl sm:text-4xl md:text-5xl font-bold text-white tracking-wide mb-2">
-            <span className="text-red-400">Game Over</span>
+            <span className="text-red-400">Eliminated</span>
           </h2>
-          <p className="text-gray-300 text-xs sm:text-sm tracking-[0.25em] uppercase font-medium">
-            {gameMode === GAME_MODES.SURVIVOR ? 'Survivor' : 'Timed'} Mode — Level {level}
+          <p className="text-gray-400 text-xs sm:text-sm tracking-[0.15em] uppercase font-medium mb-1">
+            Round {round} of 8
+          </p>
+          <p className="text-gray-500 text-[10px] sm:text-xs tracking-wide">
+            Find all Samsung products to advance
           </p>
         </div>
         <div className="game-over-stats-panel mb-6 sm:mb-8">
@@ -948,13 +1239,21 @@ export default function App() {
             <span className="font-mono font-bold text-white text-xl sm:text-2xl">{score}</span>
           </div>
           <div className="flex justify-between items-center py-3">
-            <span className="text-gray-400 text-xs sm:text-sm tracking-[0.2em] uppercase font-medium">Level Reached</span>
-            <span className="font-mono font-bold text-white text-xl sm:text-2xl">{level}</span>
+            <span className="text-gray-400 text-xs sm:text-sm tracking-[0.2em] uppercase font-medium">Round Reached</span>
+            <span className="font-mono font-bold text-white text-xl sm:text-2xl">{round}</span>
           </div>
         </div>
+        {score >= PRIZE_TIERS[0].threshold && (
+          <div className="text-center mb-5">
+            <p className="text-[10px] text-gray-500 tracking-widest uppercase mb-2">Prize Earned</p>
+            <p className="text-lg font-bold text-yellow-400">
+              {score >= PRIZE_TIERS[1].threshold ? PRIZE_TIERS[1].name : PRIZE_TIERS[0].name}
+            </p>
+          </div>
+        )}
         <div className="flex flex-col gap-3 w-full max-w-xs mx-auto">
           <button
-            className="start-screen__btn start-screen__btn--survivor w-full"
+            className="start-screen__btn start-screen__btn--primary w-full"
             onClick={() => { playSound('click', isMuted); setGameState('NAME_INPUT'); }}
           >
             <span className="start-screen__btn-inner">
@@ -975,26 +1274,6 @@ export default function App() {
       </div>
     </div>
   );
-
-  const handleNameSubmit = () => {
-    const pending = pendingScoreRef.current;
-    if (pending) {
-      const name = playerName.trim() || 'Anonymous';
-      const newEntry = { name, score: pending.score, date: new Date().toLocaleDateString(), mode: pending.mode, level: pending.level };
-      // Calculate rank BEFORE saving so we use the current leaderboard + new entry
-      const modeEntries = [...leaderboard, newEntry].filter(e => (e.mode || GAME_MODES.TIMED) === pending.mode).sort((a, b) => b.score - a.score);
-      const rank = modeEntries.findIndex(e => e === newEntry) + 1;
-      saveScore(pending.score, pending.mode, pending.level, name);
-      setRankRevealData({ rank, entry: newEntry, mode: pending.mode });
-      pendingScoreRef.current = null;
-      setPlayerName('');
-      triggerTransition(() => setGameState('RANK_REVEAL'), 'none');
-    } else {
-      // No pending score — go straight to menu
-      setPlayerName('');
-      triggerTransition(() => setGameState('MENU'), 'menu');
-    }
-  };
 
   const renderNameInput = () => {
     const kbRows = [
@@ -1021,11 +1300,10 @@ export default function App() {
               <span className="text-[#0689D8] font-bold">Save Score</span>
             </h2>
             <p className="text-gray-400 text-[10px] sm:text-xs tracking-widest uppercase">
-              {pendingScoreRef.current?.score || 0} pts — Level {pendingScoreRef.current?.level || 1}
+              {pendingScoreRef.current?.score || 0} pts — Round {pendingScoreRef.current?.round || 1}
             </p>
           </div>
 
-          {/* Name display */}
           <div className="w-full bg-[#0A0A0A] border border-[#333] rounded-xl px-4 py-3 mb-4 min-h-[52px] flex items-center justify-center">
             {playerName ? (
               <span className="text-white text-xl sm:text-2xl font-mono tracking-[0.2em] text-center">{playerName}<span className="animate-pulse text-[#0689D8]">|</span></span>
@@ -1034,7 +1312,6 @@ export default function App() {
             )}
           </div>
 
-          {/* On-screen keyboard */}
           <div className="w-full bg-[#1A1A1A]/80 border border-[#2A2A2A] backdrop-blur-md rounded-2xl p-2 sm:p-3 mb-4 shadow-2xl">
             {kbRows.map((row, ri) => (
               <div key={ri} className="flex justify-center gap-[5px] sm:gap-1.5 mb-[5px] sm:mb-1.5">
@@ -1049,7 +1326,6 @@ export default function App() {
                 ))}
               </div>
             ))}
-            {/* Bottom row: delete, space, done */}
             <div className="flex justify-center gap-[5px] sm:gap-1.5">
               <button
                 onClick={() => handleKey('DEL')}
@@ -1072,7 +1348,6 @@ export default function App() {
             </div>
           </div>
 
-          {/* Skip button */}
           <button
             className="w-full text-center text-gray-500 hover:text-gray-300 text-xs sm:text-sm tracking-widest uppercase py-2 transition-colors touch-manipulation"
             onClick={() => { playSound('click', isMuted); pendingScoreRef.current = null; setPlayerName(''); triggerTransition(() => setGameState('MENU'), 'menu'); }}
@@ -1084,223 +1359,376 @@ export default function App() {
     );
   };
 
-  const handleAdvanceLevel = () => {
-    generateScatterDirs(deck.length);
-    setGameState('SCATTERING');
-    setIsScattering(true);
-    playSound('scatter', isMuted);
-    playSound('levelTransition', isMuted);
-    setTimeout(() => {
-      setIsTransitioning(true);
-      bgRef.current?.nextRound();
-      playSound('warpWoosh', isMuted);
-      setTimeout(() => {
-        setIsScattering(false);
-        setScoreAtLevelStart(score);
-        setupLevel(level + 1);
-      }, 650);
-      setTimeout(() => { setIsTransitioning(false); }, 1300);
-    }, 1800);
+  // ─── Admin PIN touchpad helpers ───
+  const handleAdminPinDigit = (digit) => {
+    playSound('click', isMuted);
+    setAdminPinError(false);
+    setAdminPin(prev => {
+      if (prev.length >= 4) return prev;
+      const next = prev + digit;
+      // Auto-submit when 4 digits entered
+      if (next.length === 4) {
+        setTimeout(() => {
+          if (next === '1313') {
+            setAdminUnlocked(true);
+            setAdminPinError(false);
+            setAdminPin('');
+            playSound('correct', isMuted);
+          } else {
+            setAdminPinError(true);
+            playSound('wrong', isMuted);
+            setTimeout(() => { setAdminPin(''); setAdminPinError(false); }, 1000);
+          }
+        }, 150);
+      }
+      return next;
+    });
   };
 
-  const handleReturnToDashboard = () => {
-    if (mismatchTimeoutRef.current) { clearTimeout(mismatchTimeoutRef.current); mismatchTimeoutRef.current = null; }
-    if (score > 0) {
-      pendingScoreRef.current = { score, mode: gameMode, level };
+  const handleAdminPinBackspace = () => {
+    playSound('click', isMuted);
+    setAdminPin(prev => prev.slice(0, -1));
+    setAdminPinError(false);
+  };
+
+  const handleAdminPinSubmit = () => {
+    if (adminPin === '1313') {
+      setAdminUnlocked(true);
+      setAdminPinError(false);
+      setAdminPin('');
+      playSound('correct', isMuted);
+    } else {
+      setAdminPinError(true);
+      playSound('wrong', isMuted);
+      setTimeout(() => { setAdminPin(''); setAdminPinError(false); }, 1000);
     }
-    generateScatterDirs(deck.length);
-    setGameState('SCATTERING');
-    setIsScattering(true);
-    playSound('scatter', isMuted);
-    bgRef.current?.gameOver();
-    setTimeout(() => {
-      setIsTransitioning(true);
-      bgRef.current?.returnToMenu();
-      setTimeout(() => {
-        setIsScattering(false);
-        if (pendingScoreRef.current) {
-          setGameState('NAME_INPUT');
-        } else {
-          setGameState('MENU');
-        }
-      }, 650);
-      setTimeout(() => { setIsTransitioning(false); }, 1300);
-    }, 1800);
   };
 
-  const handleGrandPrize = () => {
-    // Record the winner and show the congratulations screen
-    addGrandPrizeWinner(playerName || 'Winner');
-    bgRef.current?.celebrate?.();
-    setGameState('GRAND_PRIZE');
+  const handleAdminClearLeaderboard = async () => {
+    if (adminBusy) return;
+    setAdminBusy(true);
+    setAdminMsg('');
+    try {
+      await clearLeaderboard('1313');
+      setLeaderboard([]);
+      localStorage.removeItem('galaxy-sync-leaderboard');
+      setAdminMsg('Leaderboard cleared');
+      playSound('correct', isMuted);
+    } catch {
+      // Cloud failed — clear local only
+      setLeaderboard([]);
+      localStorage.removeItem('galaxy-sync-leaderboard');
+      setAdminMsg('Cleared locally (cloud unavailable)');
+    }
+    setAdminBusy(false);
+    setTimeout(() => setAdminMsg(''), 3000);
   };
 
-  const handleGrandPrizeContinue = () => {
-    // After grand prize screen, go to name input to save score
-    pendingScoreRef.current = { score, mode: gameMode, level };
-    triggerTransition(() => setGameState('NAME_INPUT'), 'menu');
+  const handleAdminResetGrandPrize = async () => {
+    if (adminBusy) return;
+    setAdminBusy(true);
+    setAdminMsg('');
+    try {
+      await resetGrandPrizeTodayRemote('1313');
+      resetGrandPrizeToday();
+      setGpWinnersToday(0);
+      setAdminMsg('Grand prize winners reset');
+      playSound('correct', isMuted);
+    } catch {
+      resetGrandPrizeToday();
+      setGpWinnersToday(0);
+      setAdminMsg('Reset locally (cloud unavailable)');
+    }
+    setAdminBusy(false);
+    setTimeout(() => setAdminMsg(''), 3000);
   };
+
+  // ─── Settings Panel ───
+  const renderSettings = () => {
+    if (!showSettings) return null;
+    return (
+      <div className="fixed top-12 right-3 sm:top-14 sm:right-4 md:right-6 z-50 w-56 sm:w-64 bg-[#131313]/95 border border-[#2A2A2A] backdrop-blur-xl rounded-2xl shadow-2xl overflow-hidden settings-panel-enter" style={{ maxHeight: '85vh', overflowY: 'auto' }}>
+        <div className="flex items-center justify-between px-4 pt-4 pb-2">
+          <span className="text-[10px] sm:text-[11px] text-gray-400 tracking-[0.2em] uppercase font-semibold">Audio</span>
+          <button onClick={() => { setShowSettings(false); setShowAdminPanel(false); setAdminUnlocked(false); setAdminPin(''); }} className="text-gray-500 hover:text-white transition-colors p-0.5">
+            <X size={14} />
+          </button>
+        </div>
+        <div className="px-4 pb-4 space-y-4">
+          <button
+            onClick={() => {
+              if (!isMuted) playSound('toggleOff', false);
+              setIsMuted(!isMuted);
+              if (isMuted) setTimeout(() => playSound('toggleOn', false), 50);
+            }}
+            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border transition-all duration-200 ${isMuted
+              ? 'bg-red-500/10 border-red-500/20 text-red-400'
+              : 'bg-white/[0.03] border-white/[0.06] text-gray-300 hover:bg-white/[0.06]'
+            }`}
+          >
+            {isMuted ? <VolumeX size={15} /> : <Volume2 size={15} />}
+            <span className="text-xs font-medium tracking-wide">{isMuted ? 'Muted' : 'Sound On'}</span>
+          </button>
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-2 text-gray-400">
+              <Music size={12} className="shrink-0 translate-y-[0.5px]" />
+              <span className="text-[10px] tracking-[0.15em] uppercase font-medium leading-none">Music</span>
+              <span className="text-[10px] text-gray-600 ml-auto font-mono leading-none">{Math.round(musicVol * 100)}%</span>
+            </div>
+            <input type="range" min="0" max="100" value={Math.round(musicVol * 100)}
+              onChange={(e) => { const v = parseInt(e.target.value) / 100; setMusicVol(v); setMusicVolume(v); }}
+              className="settings-slider w-full" disabled={isMuted} />
+          </div>
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-2 text-gray-400">
+              <Zap size={12} className="shrink-0 translate-y-[0.5px]" />
+              <span className="text-[10px] tracking-[0.15em] uppercase font-medium leading-none">SFX</span>
+              <span className="text-[10px] text-gray-600 ml-auto font-mono leading-none">{Math.round(sfxVol * 100)}%</span>
+            </div>
+            <input type="range" min="0" max="100" value={Math.round(sfxVol * 100)}
+              onChange={(e) => { const v = parseInt(e.target.value) / 100; setSfxVol(v); setSfxVolume(v); }}
+              className="settings-slider w-full" disabled={isMuted} />
+          </div>
+          <div className="border-t border-white/[0.06] pt-3 mt-1">
+            <span className="text-[10px] sm:text-[11px] text-gray-400 tracking-[0.2em] uppercase font-semibold">Grand Prize</span>
+          </div>
+          <button
+            onClick={() => { const next = !gpDisabled; setGrandPrizeDisabled(next); setGpDisabled(next); playSound('click', isMuted); }}
+            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border transition-all duration-200 ${gpDisabled
+              ? 'bg-red-500/10 border-red-500/20 text-red-400'
+              : 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
+            }`}
+          >
+            <Trophy size={15} />
+            <span className="text-xs font-medium tracking-wide">{gpDisabled ? 'Disabled' : 'Enabled'}</span>
+          </button>
+          <div className="flex items-center justify-between">
+            <div className="flex flex-col">
+              <span className="text-[10px] text-gray-400 tracking-wider uppercase font-medium">Today's Winners</span>
+              <span className="text-xs text-white font-mono mt-0.5">{gpWinnersToday} / {GRAND_PRIZE_DAILY_MAX}</span>
+            </div>
+            <button
+              onClick={() => { resetGrandPrizeToday(); setGpWinnersToday(0); playSound('click', isMuted); }}
+              className="text-[10px] tracking-wider uppercase font-semibold text-yellow-400 hover:text-yellow-300 px-3 py-1.5 rounded-lg border border-yellow-400/20 hover:border-yellow-400/40 hover:bg-yellow-400/5 transition-all"
+            >
+              Reset
+            </button>
+          </div>
+
+          {/* ─── Admin Settings ─── */}
+          <div className="border-t border-white/[0.06] pt-3 mt-1">
+            <button
+              onClick={() => { setShowAdminPanel(true); setShowSettings(false); playSound('click', isMuted); }}
+              className="w-full flex items-center gap-2 text-gray-400 hover:text-gray-200 transition-colors active:scale-95"
+            >
+              <Shield size={13} />
+              <span className="text-[10px] sm:text-[11px] tracking-[0.2em] uppercase font-semibold">Admin Settings</span>
+              <Lock size={11} className="ml-auto" />
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // ─── Admin Overlay (fullscreen touchpad + actions) ───
+  const renderAdminOverlay = () => {
+    if (!showAdminPanel) return null;
+
+    const closeAdmin = () => {
+      setShowAdminPanel(false);
+      setAdminUnlocked(false);
+      setAdminPin('');
+      setAdminPinError(false);
+      setAdminMsg('');
+    };
+
+    // PIN dots display
+    const pinDots = Array.from({ length: 4 }, (_, i) => (
+      <div
+        key={i}
+        className={`w-4 h-4 sm:w-5 sm:h-5 rounded-full border-2 transition-all duration-150 ${
+          adminPinError
+            ? 'border-red-500 bg-red-500'
+            : i < adminPin.length
+              ? 'border-[#0689D8] bg-[#0689D8]'
+              : 'border-white/20 bg-transparent'
+        }`}
+      />
+    ));
+
+    return (
+      <div className="fixed inset-0 z-[100] bg-black/[0.97] backdrop-blur-2xl flex items-center justify-center">
+        {/* Close button */}
+        <button
+          onClick={closeAdmin}
+          className="absolute top-4 right-4 sm:top-6 sm:right-6 p-3 text-gray-400 hover:text-white transition-colors active:scale-90 touch-manipulation"
+        >
+          <X size={24} />
+        </button>
+
+        {!adminUnlocked ? (
+          /* ── PIN Touchpad ── */
+          <div className="flex flex-col items-center gap-6 sm:gap-8 w-full max-w-xs px-4">
+            {/* Header */}
+            <div className="flex flex-col items-center gap-3">
+              <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-white/[0.04] border border-white/[0.08] flex items-center justify-center">
+                <Shield size={28} className="text-[#0689D8]" />
+              </div>
+              <h3 className="text-white text-lg sm:text-xl font-semibold tracking-wide">Admin Access</h3>
+              <p className={`text-xs tracking-[0.2em] uppercase transition-colors ${adminPinError ? 'text-red-400' : 'text-gray-500'}`}>
+                {adminPinError ? 'Incorrect PIN' : 'Enter PIN'}
+              </p>
+            </div>
+
+            {/* PIN dots */}
+            <div className={`flex gap-4 sm:gap-5 ${adminPinError ? 'animate-[shake_0.4s_ease-in-out]' : ''}`}>
+              {pinDots}
+            </div>
+
+            {/* Numeric touchpad */}
+            <div className="grid grid-cols-3 gap-3 sm:gap-4 w-full">
+              {[1, 2, 3, 4, 5, 6, 7, 8, 9].map(n => (
+                <button
+                  key={n}
+                  onClick={() => handleAdminPinDigit(String(n))}
+                  className="aspect-square rounded-2xl bg-white/[0.04] border border-white/[0.06] text-white text-2xl sm:text-3xl font-light flex items-center justify-center hover:bg-white/[0.08] active:bg-white/[0.12] active:scale-95 transition-all duration-100 touch-manipulation select-none"
+                >
+                  {n}
+                </button>
+              ))}
+              {/* Bottom row: empty, 0, backspace */}
+              <div />
+              <button
+                onClick={() => handleAdminPinDigit('0')}
+                className="aspect-square rounded-2xl bg-white/[0.04] border border-white/[0.06] text-white text-2xl sm:text-3xl font-light flex items-center justify-center hover:bg-white/[0.08] active:bg-white/[0.12] active:scale-95 transition-all duration-100 touch-manipulation select-none"
+              >
+                0
+              </button>
+              <button
+                onClick={handleAdminPinBackspace}
+                className="aspect-square rounded-2xl bg-white/[0.02] border border-white/[0.04] text-gray-400 text-lg flex items-center justify-center hover:bg-white/[0.06] active:bg-white/[0.1] active:scale-95 transition-all duration-100 touch-manipulation select-none"
+              >
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 4H8l-7 8 7 8h13a2 2 0 002-2V6a2 2 0 00-2-2z"/><line x1="18" y1="9" x2="12" y2="15"/><line x1="12" y1="9" x2="18" y2="15"/></svg>
+              </button>
+            </div>
+          </div>
+        ) : (
+          /* ── Admin Actions (unlocked) ── */
+          <div className="flex flex-col items-center gap-5 sm:gap-6 w-full max-w-sm px-6">
+            {/* Header */}
+            <div className="flex flex-col items-center gap-2">
+              <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
+                <Shield size={28} className="text-emerald-400" />
+              </div>
+              <h3 className="text-white text-lg sm:text-xl font-semibold tracking-wide">Admin Panel</h3>
+            </div>
+
+            {/* Status message */}
+            {adminMsg && (
+              <div className="w-full text-sm text-emerald-400 tracking-wider bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-4 py-3 text-center">
+                {adminMsg}
+              </div>
+            )}
+
+            {/* Action buttons — large touch targets */}
+            <div className="w-full space-y-3">
+              <button
+                onClick={handleAdminResetGrandPrize}
+                disabled={adminBusy}
+                className="w-full flex items-center gap-4 px-5 py-4 rounded-2xl border border-yellow-500/20 bg-yellow-500/5 text-yellow-400 hover:bg-yellow-500/10 active:bg-yellow-500/15 active:scale-[0.98] transition-all duration-150 disabled:opacity-40 touch-manipulation"
+              >
+                <RotateCcw size={22} className={adminBusy ? 'animate-spin' : ''} />
+                <div className="text-left">
+                  <span className="text-sm sm:text-base font-medium block">Reset Grand Prize</span>
+                  <span className="text-[10px] sm:text-xs text-yellow-500/60 tracking-wider uppercase">Clear today's winners</span>
+                </div>
+              </button>
+
+              <button
+                onClick={handleAdminClearLeaderboard}
+                disabled={adminBusy}
+                className="w-full flex items-center gap-4 px-5 py-4 rounded-2xl border border-red-500/20 bg-red-500/5 text-red-400 hover:bg-red-500/10 active:bg-red-500/15 active:scale-[0.98] transition-all duration-150 disabled:opacity-40 touch-manipulation"
+              >
+                <Trash2 size={22} />
+                <div className="text-left">
+                  <span className="text-sm sm:text-base font-medium block">Clear Leaderboard</span>
+                  <span className="text-[10px] sm:text-xs text-red-500/60 tracking-wider uppercase">Erase all scores</span>
+                </div>
+              </button>
+
+            </div>
+
+            {/* Lock button */}
+            <button
+              onClick={closeAdmin}
+              className="text-xs text-gray-500 hover:text-gray-300 tracking-[0.2em] uppercase py-2 transition-colors touch-manipulation active:scale-95"
+            >
+              Lock & Close
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  // ═══════════════════════════════════════════
+  //  MAIN RENDER
+  // ═══════════════════════════════════════════
+  const isInGame = ['DEAL', 'REVEAL', 'SHUFFLING', 'SELECTION'].includes(gameState);
 
   return (
     <div className="min-h-screen min-h-[100dvh] bg-[#05060a] flex flex-col items-center justify-center relative overflow-hidden">
       <SpaceBackground ref={bgRef} />
       <div className={`relative z-10 w-full h-full min-h-screen min-h-[100dvh] flex flex-col items-center justify-center py-4 sm:py-6 transition-opacity duration-[650ms] ease-[cubic-bezier(.22,1,.36,1)] ${isTransitioning ? 'opacity-0' : 'opacity-100'}`}>
-        {/* Settings gear — shown on menu/leaderboard screens (in-game settings is in the HUD) */}
+        {/* Settings gear — menu/leaderboard screens */}
         {(gameState === 'MENU' || gameState === 'LEADERBOARD') && (
           <button
-            onClick={() => { playSound('click', isMuted); setShowSettings(s => { if (!s) { setGpWinnersToday(getGrandPrizeWinnersToday().length); setGpDisabled(isGrandPrizeDisabled()); } return !s; }); }}
+            onClick={() => { playSound('click', isMuted); setShowSettings(s => !s); }}
             className="fixed top-3 right-3 sm:top-4 sm:right-4 md:right-6 z-40 p-2 text-gray-400 hover:text-white transition-all duration-300 rounded-lg hover:bg-white/[0.06]"
             aria-label="Settings"
-            style={{ opacity: showSettings ? 1 : undefined }}
           >
             <Settings size={18} className={`sm:w-5 sm:h-5 transition-transform duration-300 ${showSettings ? 'rotate-90' : ''}`} />
           </button>
         )}
 
-        {/* Settings panel */}
-        {showSettings && (
-          <div className="fixed top-12 right-3 sm:top-14 sm:right-4 md:right-6 z-50 w-56 sm:w-64 bg-[#131313]/95 border border-[#2A2A2A] backdrop-blur-xl rounded-2xl shadow-2xl overflow-hidden settings-panel-enter">
-            <div className="flex items-center justify-between px-4 pt-4 pb-2">
-              <span className="text-[10px] sm:text-[11px] text-gray-400 tracking-[0.2em] uppercase font-semibold">Audio</span>
-              <button onClick={() => setShowSettings(false)} className="text-gray-500 hover:text-white transition-colors p-0.5">
-                <X size={14} />
-              </button>
-            </div>
+        {renderSettings()}
+        {renderAdminOverlay()}
 
-            <div className="px-4 pb-4 space-y-4">
-              {/* Master mute */}
-              <button
-                onClick={() => {
-                  if (!isMuted) playSound('toggleOff', false);
-                  setIsMuted(!isMuted);
-                  if (isMuted) setTimeout(() => playSound('toggleOn', false), 50);
-                }}
-                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border transition-all duration-200 ${isMuted
-                    ? 'bg-red-500/10 border-red-500/20 text-red-400'
-                    : 'bg-white/[0.03] border-white/[0.06] text-gray-300 hover:bg-white/[0.06]'
-                  }`}
-              >
-                {isMuted ? <VolumeX size={15} /> : <Volume2 size={15} />}
-                <span className="text-xs font-medium tracking-wide">{isMuted ? 'Muted' : 'Sound On'}</span>
-              </button>
-
-              {/* Music volume */}
-              <div className="space-y-1.5">
-                <div className="flex items-center gap-2 text-gray-400">
-                  <Music size={13} />
-                  <span className="text-[10px] tracking-[0.15em] uppercase font-medium">Music</span>
-                  <span className="text-[10px] text-gray-600 ml-auto font-mono">{Math.round(musicVol * 100)}%</span>
-                </div>
-                <input
-                  type="range"
-                  min="0"
-                  max="100"
-                  value={Math.round(musicVol * 100)}
-                  onChange={(e) => {
-                    const v = parseInt(e.target.value) / 100;
-                    setMusicVol(v);
-                    setMusicVolume(v);
-                  }}
-                  className="settings-slider w-full"
-                  disabled={isMuted}
-                />
-              </div>
-
-              {/* SFX volume */}
-              <div className="space-y-1.5">
-                <div className="flex items-center gap-2 text-gray-400">
-                  <Zap size={13} />
-                  <span className="text-[10px] tracking-[0.15em] uppercase font-medium">SFX</span>
-                  <span className="text-[10px] text-gray-600 ml-auto font-mono">{Math.round(sfxVol * 100)}%</span>
-                </div>
-                <input
-                  type="range"
-                  min="0"
-                  max="100"
-                  value={Math.round(sfxVol * 100)}
-                  onChange={(e) => {
-                    const v = parseInt(e.target.value) / 100;
-                    setSfxVol(v);
-                    setSfxVolume(v);
-                  }}
-                  className="settings-slider w-full"
-                  disabled={isMuted}
-                />
-              </div>
-
-              {/* Grand Prize divider */}
-              <div className="border-t border-white/[0.06] pt-3 mt-1">
-                <span className="text-[10px] sm:text-[11px] text-gray-400 tracking-[0.2em] uppercase font-semibold">Grand Prize</span>
-              </div>
-
-              {/* Grand Prize toggle */}
-              <button
-                onClick={() => {
-                  const next = !gpDisabled;
-                  setGrandPrizeDisabled(next);
-                  setGpDisabled(next);
-                  playSound('click', isMuted);
-                }}
-                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border transition-all duration-200 ${gpDisabled
-                    ? 'bg-red-500/10 border-red-500/20 text-red-400'
-                    : 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
-                  }`}
-              >
-                <Trophy size={15} />
-                <span className="text-xs font-medium tracking-wide">{gpDisabled ? 'Disabled' : 'Enabled'}</span>
-              </button>
-
-              {/* Daily winners count + reset */}
-              <div className="flex items-center justify-between">
-                <div className="flex flex-col">
-                  <span className="text-[10px] text-gray-400 tracking-wider uppercase font-medium">Today's Winners</span>
-                  <span className="text-xs text-white font-mono mt-0.5">{gpWinnersToday} / {GRAND_PRIZE_DAILY_MAX}</span>
-                </div>
-                <button
-                  onClick={() => {
-                    resetGrandPrizeToday();
-                    setGpWinnersToday(0);
-                    playSound('click', isMuted);
-                  }}
-                  className="text-[10px] tracking-wider uppercase font-semibold text-yellow-400 hover:text-yellow-300 px-3 py-1.5 rounded-lg border border-yellow-400/20 hover:border-yellow-400/40 hover:bg-yellow-400/5 transition-all"
-                >
-                  Reset
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
         {gameState === 'SPLASH' && renderSplash()}
         {gameState === 'MENU' && renderMenu()}
         {gameState === 'LEADERBOARD' && renderLeaderboard()}
-        {gameState !== 'MENU' && gameState !== 'LEADERBOARD' && gameState !== 'SPLASH' && gameState !== 'NAME_INPUT' && gameState !== 'RANK_REVEAL' && gameState !== 'GRAND_PRIZE' && (
+
+        {isInGame && (
           <>
-            {renderSyncBar()}
-            {renderHealthBar()}
-            {gameMode === GAME_MODES.SURVIVOR && tookDamage && (
-              <div className="survivor-damage-flash" />
-            )}
+            {renderSideInfo()}
             {renderHUD()}
             <div className="flex flex-col items-center w-full h-full relative px-2 sm:px-4" style={{ paddingTop: 'var(--hud-h, 4.5rem)' }}>
               <div className="flex-1 flex items-center justify-center w-full relative">
                 {renderGrid()}
-                {renderPreviewOverlay()}
               </div>
             </div>
           </>
         )}
+
         {gameState === 'GAME_OVER' && renderGameOver()}
         {gameState === 'NAME_INPUT' && renderNameInput()}
         {gameState === 'RANK_REVEAL' && renderRankReveal()}
-        {gameState === 'LEVEL_COMPLETE' && (
-          <LevelCompleteScreen
-            level={level}
+
+        {gameState === 'ROUND_COMPLETE' && (
+          <RoundCompleteScreen
+            round={round}
             score={score}
-            scoreAtLevelStart={scoreAtLevelStart}
-            time={time}
+            scoreAtRoundStart={scoreAtRoundStart}
+            roundScore={roundScore}
+            correctTaps={correctTaps}
+            wrongTaps={wrongTaps}
+            totalSamsung={roundConfig.samsungCount}
+            isPerfect={wrongTaps === 0 && correctTaps >= roundConfig.samsungCount}
             isMuted={isMuted}
-            onAdvance={handleAdvanceLevel}
-            onReturn={handleReturnToDashboard}
+            isLastRound={round >= 8}
+            onAdvance={handleAdvanceRound}
+            onReturn={handleReturnToMenu}
             onGrandPrize={handleGrandPrize}
           />
         )}

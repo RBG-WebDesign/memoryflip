@@ -1,8 +1,8 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="96 32 320 448" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 448" role="img" aria-labelledby="title desc">
   <title id="title">Semiconductor Gold Card</title>
   <desc id="desc">Square-edged playing card with a semiconductor gold finish and etched contact patterns.</desc>
   <defs>
-    <linearGradient id="goldBase" x1="96" y1="32" x2="416" y2="480" gradientUnits="userSpaceOnUse">
+    <linearGradient id="goldBase" x1="0" y1="0" x2="320" y2="448" gradientUnits="userSpaceOnUse">
       <stop offset="0" stop-color="#d1a23a"/>
       <stop offset="0.12" stop-color="#9f7317"/>
       <stop offset="0.28" stop-color="#e6c56e"/>
@@ -11,7 +11,7 @@
       <stop offset="0.8" stop-color="#9d6e18"/>
       <stop offset="1" stop-color="#c89832"/>
     </linearGradient>
-    <linearGradient id="goldInner" x1="124" y1="60" x2="388" y2="452" gradientUnits="userSpaceOnUse">
+    <linearGradient id="goldInner" x1="28" y1="28" x2="292" y2="420" gradientUnits="userSpaceOnUse">
       <stop offset="0" stop-color="#f3da95"/>
       <stop offset="0.1" stop-color="#c6922b"/>
       <stop offset="0.2" stop-color="#f7e7ae"/>
@@ -20,14 +20,14 @@
       <stop offset="0.76" stop-color="#a5721b"/>
       <stop offset="1" stop-color="#ddb960"/>
     </linearGradient>
-    <linearGradient id="goldSheen" x1="124" y1="60" x2="388" y2="452" gradientUnits="userSpaceOnUse">
+    <linearGradient id="goldSheen" x1="28" y1="28" x2="292" y2="420" gradientUnits="userSpaceOnUse">
       <stop offset="0" stop-color="#fff3c2" stop-opacity="0.72"/>
       <stop offset="0.16" stop-color="#fff6d9" stop-opacity="0.14"/>
       <stop offset="0.5" stop-color="#fff0b5" stop-opacity="0.08"/>
       <stop offset="0.82" stop-color="#5f3d02" stop-opacity="0.08"/>
       <stop offset="1" stop-color="#000000" stop-opacity="0.14"/>
     </linearGradient>
-    <linearGradient id="traceGold" x1="140" y1="90" x2="372" y2="430" gradientUnits="userSpaceOnUse">
+    <linearGradient id="traceGold" x1="44" y1="58" x2="276" y2="398" gradientUnits="userSpaceOnUse">
       <stop offset="0" stop-color="#fff0af"/>
       <stop offset="0.34" stop-color="#f0d37f"/>
       <stop offset="0.68" stop-color="#c08a25"/>
@@ -49,7 +49,7 @@
     </pattern>
   </defs>
 
-  <g>
+  <g transform="translate(-96,-32)">
     <rect x="96" y="32" width="320" height="448" fill="url(#goldBase)"/>
     <rect x="108" y="44" width="296" height="424" fill="#a8741f"/>
     <rect x="124" y="60" width="264" height="392" fill="url(#goldInner)"/>

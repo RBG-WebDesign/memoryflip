@@ -1,54 +1,11 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Trophy, ArrowRight, RotateCcw, Star } from 'lucide-react';
+import React, { useEffect, useRef, useState, useMemo } from 'react';
+import { Trophy, ArrowRight, Home, CheckCircle, XCircle, Sparkles } from 'lucide-react';
 import { playSound } from '../utils/audio';
-import { GRAND_PRIZE_THRESHOLD, isGrandPrizeAvailable } from '../constants/config';
+import { GRAND_PRIZE_THRESHOLD, isGrandPrizeAvailable, PRIZE_TIERS } from '../constants/config';
 
-// --- STAR THRESHOLDS (per level, based on level score only) ---
-// Tuned so 3 stars requires near-perfect play (no mismatches, fast clears).
-// Level 1: 2 pairs → max ~260 perfect. Level 2: 3 pairs → max ~390.
-// Level 3: 6 pairs → max ~780. Level 4: 10 pairs → max ~1300. Level 5: 12 pairs → max ~1560.
-const BASE_STAR_THRESHOLDS = {
-  1: [120, 180, 240],
-  2: [150, 250, 350],
-  3: [300, 500, 700],
-  4: [450, 750, 1050],
-  5: [500, 850, 1200],
-};
-
-function getStarThresholds(level) {
-  if (BASE_STAR_THRESHOLDS[level]) return BASE_STAR_THRESHOLDS[level];
-  // Level 6+: very hard thresholds
-  return [550, 900, 1300];
-}
-
-// Legacy compat
-const STAR_THRESHOLDS = new Proxy(BASE_STAR_THRESHOLDS, {
-  get(target, key) {
-    const level = parseInt(key, 10);
-    if (!isNaN(level)) return getStarThresholds(level);
-    return target[key];
-  },
-});
-
-function computeStars(levelScore, level) {
-  const thresholds = STAR_THRESHOLDS[level] || [100, 200, 300];
-  if (levelScore >= thresholds[2]) return 3;
-  if (levelScore >= thresholds[1]) return 2;
-  if (levelScore >= thresholds[0]) return 1;
-  return 0;
-}
-
-function formatTime(seconds) {
-  const m = Math.floor(seconds / 60);
-  const s = Math.floor(seconds % 60);
-  return `${m}:${String(s).padStart(2, '0')}`;
-}
-
-// --- SCORE TALLY HOOK ---
-function useScoreTally({ targetScore, startScore, level, isMuted, active }) {
+// --- SCORE TALLY HOOK (simplified for round-based scoring) ---
+function useScoreTally({ targetScore, startScore, isMuted, active }) {
   const [displayScore, setDisplayScore] = useState(startScore);
-  const [earnedStars, setEarnedStars] = useState(0);
-  const [impactStar, setImpactStar] = useState(0);
   const [isComplete, setIsComplete] = useState(false);
   const [finishPulse, setFinishPulse] = useState(false);
 
@@ -66,233 +23,112 @@ function useScoreTally({ targetScore, startScore, level, isMuted, active }) {
 
     if (!active) {
       setDisplayScore(startScore);
-      setEarnedStars(0);
-      setImpactStar(0);
       setIsComplete(false);
       setFinishPulse(false);
       return undefined;
     }
 
     let cancelled = false;
-    const thresholds = STAR_THRESHOLDS[level] || [100, 200, 300];
-    const levelTarget = Math.max(0, targetScore - startScore);
-
     setDisplayScore(startScore);
-    setEarnedStars(0);
-    setImpactStar(0);
     setIsComplete(false);
     setFinishPulse(false);
 
-    const stops = thresholds
-      .filter((value) => value <= levelTarget)
-      .map((value) => startScore + value);
-
-    if (stops[stops.length - 1] !== targetScore) {
-      stops.push(targetScore);
+    const diff = targetScore - startScore;
+    if (diff <= 0) {
+      setDisplayScore(targetScore);
+      setIsComplete(true);
+      return undefined;
     }
 
-    const wait = (ms) =>
-      new Promise((resolve) => {
-        const id = setTimeout(resolve, ms);
-        timeoutRefs.current.push(id);
-      });
+    const duration = Math.min(1200, Math.max(400, 300 + diff * 0.8));
+    const startTime = performance.now();
+    let lastTick = startTime;
 
-    const animateSegment = (from, to) =>
-      new Promise((resolve) => {
-        if (cancelled || to <= from) {
-          setDisplayScore(to);
-          resolve();
-          return;
-        }
+    const frame = (now) => {
+      if (cancelled) return;
+      const t = Math.min(1, (now - startTime) / duration);
+      const eased = 1 - Math.pow(1 - t, 3);
+      const nextValue = Math.round(startScore + diff * eased);
+      setDisplayScore(nextValue);
 
-        const diff = to - from;
-        const duration = Math.min(1050, Math.max(280, 260 + diff * 0.8));
-        const startTime = performance.now();
-        let lastTick = startTime;
-
-        const frame = (now) => {
-          if (cancelled) {
-            resolve();
-            return;
-          }
-
-          const t = Math.min(1, (now - startTime) / duration);
-          const eased = 1 - Math.pow(1 - t, 3);
-          const nextValue = Math.round(from + diff * eased);
-
-          setDisplayScore(nextValue);
-
-          const tickGap = 70 - Math.min(35, t * 35);
-          if (now - lastTick >= tickGap && nextValue < to) {
-            playSound('tick', isMuted);
-            lastTick = now;
-          }
-
-          if (t < 1) {
-            rafRef.current = requestAnimationFrame(frame);
-          } else {
-            setDisplayScore(to);
-            resolve();
-          }
-        };
-
-        rafRef.current = requestAnimationFrame(frame);
-      });
-
-    const run = async () => {
-      let current = startScore;
-      let previousStars = 0;
-
-      for (const stop of stops) {
-        await animateSegment(current, stop);
-        if (cancelled) return;
-
-        const levelScoreAtStop = Math.max(0, stop - startScore);
-        const newStars = computeStars(levelScoreAtStop, level);
-
-        if (newStars > previousStars) {
-          setEarnedStars(newStars);
-          setImpactStar(newStars);
-          playSound(`star${newStars}`, isMuted);
-          previousStars = newStars;
-
-          const clearImpact = setTimeout(() => {
-            if (!cancelled) setImpactStar(0);
-          }, 430);
-          timeoutRefs.current.push(clearImpact);
-
-          await wait(220);
-          if (cancelled) return;
-        }
-
-        current = stop;
+      const tickGap = 70 - Math.min(35, t * 35);
+      if (now - lastTick >= tickGap && nextValue < targetScore) {
+        playSound('tick', isMuted);
+        lastTick = now;
       }
 
-      setIsComplete(true);
-      setFinishPulse(true);
-      playSound('tallyFinish', isMuted);
-
-      const finishTimeout = setTimeout(() => {
-        if (!cancelled) setFinishPulse(false);
-      }, 700);
-      timeoutRefs.current.push(finishTimeout);
+      if (t < 1) {
+        rafRef.current = requestAnimationFrame(frame);
+      } else {
+        setDisplayScore(targetScore);
+        setIsComplete(true);
+        setFinishPulse(true);
+        playSound('tallyFinish', isMuted);
+        const id = setTimeout(() => { if (!cancelled) setFinishPulse(false); }, 700);
+        timeoutRefs.current.push(id);
+      }
     };
 
-    run();
-
-    return () => {
-      cancelled = true;
-      clearAll();
-    };
-  }, [active, level, targetScore, startScore, isMuted]);
+    rafRef.current = requestAnimationFrame(frame);
+    return () => { cancelled = true; clearAll(); };
+  }, [active, targetScore, startScore, isMuted]);
 
   const levelScore = Math.max(0, displayScore - startScore);
   const isTallying = active && !isComplete;
 
-  return {
-    displayScore,
-    displayLevelScore: levelScore,
-    earnedStars,
-    impactStar,
-    finishPulse,
-    isTallying,
-    isComplete,
-  };
+  return { displayScore, displayLevelScore: levelScore, finishPulse, isTallying, isComplete };
 }
 
-// --- STAR DISPLAY ---
-function StarRating({ earned, impactStar }) {
-  return (
-    <div className="lcs-stars-row flex items-end justify-center gap-4 mb-5 mt-3">
-      {[1, 2, 3].map((starNum) => {
-        const impacted = impactStar === starNum;
-        const earnedNow = earned >= starNum;
-
-        return (
-          <div
-            key={starNum}
-            className={`lcs-star-slot ${starNum === 2 ? 'lcs-star-center' : ''}`}
-          >
-            <Star size={48} className="lcs-star-outline" strokeWidth={1.5} />
-
-            {earnedNow && (
-              <>
-                <Star
-                  size={48}
-                  className={`lcs-star-fill lcs-star-earned ${impacted ? 'lcs-star-impact' : ''}`}
-                  strokeWidth={1.5}
-                />
-
-                {impacted && <div className="lcs-star-ring" />}
-
-                {impacted && (
-                  <div className="lcs-star-burst">
-                    {Array.from({ length: 12 }).map((_, i) => (
-                      <div
-                        key={i}
-                        className="lcs-star-particle"
-                        style={{
-                          '--p-angle': `${(i / 12) * Math.PI * 2}rad`,
-                          '--p-distance': `${20 + Math.random() * 18}px`,
-                          '--p-size': `${3 + Math.random() * 3}px`,
-                          '--p-color': i % 3 === 0 ? '#facc15' : i % 3 === 1 ? '#ffffff' : '#6c3ce0',
-                          '--p-delay': `${Math.random() * 0.05}s`,
-                        }}
-                      />
-                    ))}
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-// --- LEVEL COMPLETE SCREEN ---
-export default function LevelCompleteScreen({
-  level = 1,
+// --- ROUND COMPLETE SCREEN ---
+export default function RoundCompleteScreen({
+  round = 1,
   score = 0,
-  scoreAtLevelStart = 0,
-  time = 0,
+  scoreAtRoundStart = 0,
+  roundScore = 0,
+  correctTaps = 0,
+  wrongTaps = 0,
+  totalSamsung = 1,
+  isPerfect = false,
   isMuted = false,
+  isLastRound = false,
   onAdvance,
   onReturn,
   onGrandPrize,
 }) {
-  const thresholds = STAR_THRESHOLDS[level] || [100, 200, 300];
   const [grandPrizeAvailable] = useState(() => isGrandPrizeAvailable());
   const grandPrizeEarned = grandPrizeAvailable && score >= GRAND_PRIZE_THRESHOLD;
 
   const {
     displayScore,
     displayLevelScore,
-    earnedStars,
-    impactStar,
     finishPulse,
     isTallying,
     isComplete,
   } = useScoreTally({
     targetScore: score,
-    startScore: scoreAtLevelStart,
-    level,
+    startScore: scoreAtRoundStart,
     isMuted,
     active: true,
   });
 
-  const progressPct = Math.min(100, (displayLevelScore / thresholds[2]) * 100);
+  // Prize tier progress
+  const currentPrizeTier = PRIZE_TIERS.reduce((best, tier) => {
+    return displayScore >= tier.threshold ? tier : best;
+  }, null);
+
+  const nextPrizeTier = PRIZE_TIERS.find(tier => displayScore < tier.threshold);
+  const progressTarget = nextPrizeTier || PRIZE_TIERS[PRIZE_TIERS.length - 1];
+  const progressPct = Math.min(100, (displayScore / progressTarget.threshold) * 100);
 
   const subtitle = useMemo(() => {
-    if (isTallying) return 'Computing sync rating...';
-    if (earnedStars === 3) return 'Flawless diagnostic run.';
-    if (earnedStars === 2) return 'Excellent synchronization.';
-    if (earnedStars === 1) return 'Diagnostic complete.';
-    return 'No star threshold reached.';
-  }, [isTallying, earnedStars]);
+    if (isTallying) return 'Analyzing performance...';
+    if (isPerfect) return 'Perfect round! 1.5x bonus earned!';
+    if (correctTaps >= totalSamsung) return 'All products found!';
+    if (correctTaps > 0) return `${correctTaps} of ${totalSamsung} products found.`;
+    return 'No products found this round.';
+  }, [isTallying, isPerfect, correctTaps, totalSamsung]);
 
-  const showFinalBurst = isComplete && earnedStars === 3;
+  const showFinalBurst = isComplete && isPerfect;
 
   return (
     <div className="absolute inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm font-['Inter',sans-serif] p-4">
@@ -310,43 +146,84 @@ export default function LevelCompleteScreen({
 
         {showFinalBurst && (
           <div className="lcs-final-burst-layer">
-            {Array.from({ length: 20 }).map((_, i) => (
-              <div
-                key={i}
-                className="lcs-final-burst-particle"
-                style={{
-                  '--fp-angle': `${(i / 20) * Math.PI * 2}rad`,
-                  '--fp-distance': `${55 + Math.random() * 90}px`,
-                  '--fp-size': `${3 + Math.random() * 4}px`,
-                  '--fp-delay': `${Math.random() * 0.14}s`,
-                  '--fp-color': ['#facc15', '#ffffff', '#00d4ff', '#6c3ce0'][i % 4],
-                }}
-              />
-            ))}
+            {Array.from({ length: 20 }).map((_, i) => {
+              const angle = (i / 20) * Math.PI * 2;
+              const dist = 55 + Math.random() * 90;
+              return (
+                <div
+                  key={i}
+                  className="lcs-final-burst-particle"
+                  style={{
+                    '--fp-tx': `${Math.cos(angle) * dist}px`,
+                    '--fp-ty': `${Math.sin(angle) * dist}px`,
+                    '--fp-size': `${3 + Math.random() * 4}px`,
+                    '--fp-delay': `${Math.random() * 0.14}s`,
+                    '--fp-color': ['#facc15', '#ffffff', '#00d4ff', '#6c3ce0'][i % 4],
+                  }}
+                />
+              );
+            })}
           </div>
         )}
 
         <div className="relative z-10 text-center">
+          {/* Header */}
+          <div className="mb-2">
+            <span className="text-gray-500 text-[10px] tracking-[0.3em] uppercase font-medium">
+              Round {round} of 8
+            </span>
+          </div>
+
           <Trophy
-            size={56}
+            size={48}
             className="lcs-trophy-float mx-auto text-[#00d4ff] mb-3 drop-shadow-[0_0_16px_rgba(0,212,255,0.35)]"
           />
 
-          <h2 className="text-2xl sm:text-3xl font-light text-white mb-2 tracking-wide">
-            Sync Complete
+          <h2 className="text-2xl sm:text-3xl font-light text-white mb-1 tracking-wide">
+            {isLastRound ? 'Game Complete' : 'Round Complete'}
           </h2>
-
-          <StarRating earned={earnedStars} impactStar={impactStar} />
 
           <p className="text-gray-400 text-sm tracking-wide mb-5">
             {subtitle}
           </p>
 
-          <div className={`lcs-score-panel ${isTallying ? 'lcs-tallying' : ''} px-4 py-4 mb-5`}>
+          {/* Stats row */}
+          <div className="flex justify-center gap-3 mb-4">
+            <div className="bg-[#1A1A1A] border border-[#2A2A2A] rounded-2xl px-3 py-3 flex flex-col items-center flex-1 shadow-inner">
+              <span className="text-gray-500 text-[10px] tracking-widest uppercase mb-1">Found</span>
+              <div className="flex items-center gap-1.5">
+                <CheckCircle size={16} className="text-[#0689D8]" />
+                <span className="text-xl font-mono font-semibold text-[#0689D8]">
+                  {correctTaps}/{totalSamsung}
+                </span>
+              </div>
+            </div>
+            <div className="bg-[#1A1A1A] border border-[#2A2A2A] rounded-2xl px-3 py-3 flex flex-col items-center flex-1 shadow-inner">
+              <span className="text-gray-500 text-[10px] tracking-widest uppercase mb-1">Wrong</span>
+              <div className="flex items-center gap-1.5">
+                <XCircle size={16} className={wrongTaps > 0 ? 'text-red-400' : 'text-gray-600'} />
+                <span className={`text-xl font-mono font-semibold ${wrongTaps > 0 ? 'text-red-400' : 'text-gray-600'}`}>
+                  {wrongTaps}
+                </span>
+              </div>
+            </div>
+            {isPerfect && (
+              <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-2xl px-3 py-3 flex flex-col items-center flex-1 shadow-inner">
+                <span className="text-yellow-400 text-[10px] tracking-widest uppercase mb-1">Bonus</span>
+                <div className="flex items-center gap-1.5">
+                  <Sparkles size={16} className="text-yellow-400" />
+                  <span className="text-xl font-mono font-semibold text-yellow-400">1.5x</span>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Score panel */}
+          <div className={`lcs-score-panel ${isTallying ? 'lcs-tallying' : ''} px-4 py-4 mb-4`}>
             <div className="lcs-score-scan bg-gradient-to-r from-transparent via-white/10 to-transparent" />
 
             <div className="lcs-score-kicker text-[10px] text-gray-500 uppercase mb-1">
-              Level Score
+              Round Score
             </div>
 
             <div
@@ -364,99 +241,57 @@ export default function LevelCompleteScreen({
             <div className="text-lg font-mono font-semibold text-white/85 mt-0.5">
               {displayScore}
             </div>
+          </div>
 
-            <div className="lcs-progress-wrap">
-              <div className="lcs-progress-bar">
-                <div
-                  className="lcs-progress-fill"
-                  style={{ '--fill': `${progressPct}%` }}
-                />
-
-                <div
-                  className="lcs-progress-marker"
-                  style={{ left: `${(thresholds[0] / thresholds[2]) * 100}%` }}
-                />
-                <div
-                  className="lcs-progress-marker"
-                  style={{ left: `${(thresholds[1] / thresholds[2]) * 100}%` }}
-                />
-                <div
-                  className="lcs-progress-marker"
-                  style={{ left: `${(thresholds[2] / thresholds[2]) * 100}%` }}
-                />
-              </div>
-
-              <div className="lcs-progress-labels">
-                <span>1★ {thresholds[0]}</span>
-                <span>2★ {thresholds[1]}</span>
-                <span>3★ {thresholds[2]}</span>
-              </div>
+          {/* Prize tier progress */}
+          <div className="rounded-2xl px-4 py-3 mb-4 bg-[#0A0A0A] border border-[#2A2A2A]">
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-[10px] text-gray-500 tracking-widest uppercase font-medium">
+                {currentPrizeTier ? `Prize: ${currentPrizeTier.name}` : 'Next Prize'}
+              </span>
+              <span className="text-[10px] font-mono text-gray-400">
+                {displayScore} / {progressTarget.threshold}
+              </span>
+            </div>
+            <div className="w-full h-1.5 bg-[#1A1A1A] rounded-full overflow-hidden">
+              <div
+                className="h-full rounded-full transition-all duration-700 ease-out"
+                style={{
+                  width: `${progressPct}%`,
+                  background: displayScore >= PRIZE_TIERS[PRIZE_TIERS.length - 1].threshold
+                    ? 'linear-gradient(90deg, #facc15, #f59e0b)'
+                    : 'linear-gradient(90deg, #0689D8, #6c3ce0)',
+                }}
+              />
+            </div>
+            {/* Prize tier markers */}
+            <div className="flex justify-between mt-1.5">
+              {PRIZE_TIERS.map(tier => (
+                <span key={tier.tier} className={`text-[9px] font-mono ${displayScore >= tier.threshold ? 'text-yellow-400' : 'text-gray-600'}`}>
+                  {tier.threshold} — {tier.name}
+                </span>
+              ))}
             </div>
           </div>
 
-          <div className="flex justify-center gap-3 mb-5">
-            <div className="bg-[#1A1A1A] border border-[#2A2A2A] rounded-2xl px-4 py-4 flex flex-col items-center flex-1 shadow-inner">
-              <span className="text-gray-500 text-[10px] tracking-widest uppercase mb-1">
-                Clear Time
-              </span>
-              <span className="text-2xl font-mono font-light text-[#00d4ff]">
-                {formatTime(time)}
-              </span>
-            </div>
-
-            <div className="bg-[#1A1A1A] border border-[#2A2A2A] rounded-2xl px-4 py-4 flex flex-col items-center flex-1 shadow-inner">
-              <span className="text-gray-500 text-[10px] tracking-widest uppercase mb-1">
-                Rating
-              </span>
-              <span className={`text-xl font-semibold ${earnedStars === 3 ? 'text-yellow-400' : 'text-white'}`}>
-                {earnedStars}/3 Stars
-              </span>
-            </div>
-          </div>
-
-          {/* Grand Prize tracker — hidden once daily cap (2 winners) is reached */}
-          {!isTallying && grandPrizeAvailable && (
-            <div className={`rounded-2xl px-4 py-3 mb-4 ${grandPrizeEarned ? 'bg-yellow-500/10 border border-yellow-500/30' : 'bg-[#0A0A0A] border border-[#2A2A2A]'}`}>
-              <div className="flex items-center justify-between mb-1.5">
-                <span className="text-[10px] text-gray-500 tracking-widest uppercase font-medium">Grand Prize Goal</span>
-                <span className="text-[10px] font-mono text-gray-400">{displayScore} / {GRAND_PRIZE_THRESHOLD}</span>
-              </div>
-              <div className="w-full h-1.5 bg-[#1A1A1A] rounded-full overflow-hidden">
-                <div
-                  className="h-full rounded-full transition-all duration-700 ease-out"
-                  style={{
-                    width: `${Math.min(100, (displayScore / GRAND_PRIZE_THRESHOLD) * 100)}%`,
-                    background: grandPrizeEarned
-                      ? 'linear-gradient(90deg, #facc15, #f59e0b)'
-                      : 'linear-gradient(90deg, #0689D8, #6c3ce0)',
-                  }}
-                />
-              </div>
-              {grandPrizeEarned ? (
-                <p className="text-yellow-400 text-[10px] mt-1.5 font-semibold tracking-wider animate-pulse">GRAND PRIZE QUALIFIED!</p>
-              ) : (
-                <p className="text-gray-600 text-[10px] mt-1.5">{GRAND_PRIZE_THRESHOLD - displayScore} pts to qualify</p>
-              )}
-            </div>
-          )}
-
-          <div className="flex justify-center mb-6">
-            <div className={`lcs-result-pill ${earnedStars === 3 && !isTallying ? 'lcs-result-gold' : ''}`}>
+          {/* Result pill */}
+          <div className="flex justify-center mb-5">
+            <div className={`lcs-result-pill ${isPerfect && !isTallying ? 'lcs-result-gold' : ''}`}>
               {isTallying
                 ? 'Tallying'
                 : grandPrizeEarned
                   ? 'Grand Prize Winner!'
-                  : earnedStars === 3
-                    ? 'Top Clear'
-                    : earnedStars === 2
-                      ? 'Strong Clear'
-                      : earnedStars === 1
-                        ? 'Clear'
-                        : 'Below Threshold'}
+                  : isPerfect
+                    ? 'Perfect Round!'
+                    : correctTaps >= totalSamsung
+                      ? 'All Found'
+                      : correctTaps > 0
+                        ? 'Partial Find'
+                        : 'No Finds'}
             </div>
           </div>
 
-          {/* Grand Prize claim button — replaces normal buttons when earned */}
+          {/* Action buttons */}
           {grandPrizeEarned && !isTallying ? (
             <>
               <button
@@ -470,7 +305,7 @@ export default function LevelCompleteScreen({
                 onClick={() => onAdvance?.()}
                 className="w-full flex items-center justify-center text-gray-400 hover:text-white py-2 px-6 rounded-xl text-sm tracking-wide transition-all duration-300"
               >
-                Keep Playing
+                {isLastRound ? 'Save Score' : 'Keep Playing'}
               </button>
             </>
           ) : (
@@ -484,7 +319,7 @@ export default function LevelCompleteScreen({
                     : 'hover:from-[#00d4ff] hover:to-[#9b30ff] hover:shadow-[0_6px_25px_rgba(0,180,216,0.5)] hover:-translate-y-1'
                 }`}
               >
-                Advance to Level {level + 1}
+                {isLastRound ? 'Save Score' : `Round ${round + 1}`}
                 <ArrowRight size={18} className="ml-2" />
               </button>
               <button
@@ -494,6 +329,7 @@ export default function LevelCompleteScreen({
                   isTallying ? 'opacity-50 cursor-not-allowed' : ''
                 }`}
               >
+                <Home size={14} className="mr-1.5" />
                 End Run & Save Score
               </button>
             </>
@@ -503,5 +339,3 @@ export default function LevelCompleteScreen({
     </div>
   );
 }
-
-export { computeStars, useScoreTally, StarRating, STAR_THRESHOLDS };

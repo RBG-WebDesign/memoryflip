@@ -16,6 +16,7 @@
     "remotion:render:sheen": "npx remotion render src/remotion/index.ts CardSheenLoop --output=src/assets/cards/card-metallic-sheen.webm --codec=vp8 --image-format=png"
   },
   "dependencies": {
+    "@netlify/neon": "^0.1.2",
     "@remotion/cli": "^4.0.435",
     "@remotion/player": "^4.0.435",
     "lucide-react": "^0.395.0",

@@ -628,6 +628,90 @@ export const playSound = (type, isMuted) => {
       break;
     }
 
+    // --- Shuffle swap: swooshing card slide ---
+    case 'shuffle': {
+      if (!audioCtx) break;
+      const swOsc = audioCtx.createOscillator();
+      const swGain = audioCtx.createGain();
+      swOsc.type = 'sine';
+      swOsc.frequency.setValueAtTime(400, t);
+      swOsc.frequency.exponentialRampToValueAtTime(800, t + 0.08);
+      swOsc.frequency.exponentialRampToValueAtTime(350, t + 0.18);
+      swGain.gain.setValueAtTime(0.04, t);
+      swGain.gain.exponentialRampToValueAtTime(0.001, t + 0.2);
+      swOsc.connect(swGain);
+      swGain.connect(sfxGain);
+      swOsc.start(t);
+      swOsc.stop(t + 0.22);
+      playNoise(t, 0.12, 0.025, 6000, sfxGain);
+      break;
+    }
+
+    // --- Reveal: dramatic upward sweep when Samsung cards flip up ---
+    case 'reveal': {
+      createOsc('sine', 330, t, 0.15, 0.07, sfxGain);
+      createOsc('sine', 440, t + 0.05, 0.15, 0.07, sfxGain);
+      createOsc('sine', 660, t + 0.12, 0.2, 0.08, sfxGain);
+      createOsc('triangle', 880, t + 0.2, 0.3, 0.06, sfxGain);
+      playNoise(t + 0.15, 0.08, 0.03, 9000, sfxGain);
+      break;
+    }
+
+    // --- Correct tap: bright confirmation chime with sparkle ---
+    case 'correctTap': {
+      createOsc('sine', 659, t, 0.08, 0.1, sfxGain);
+      createOsc('sine', 988, t + 0.06, 0.12, 0.1, sfxGain);
+      createOsc('triangle', 1319, t + 0.12, 0.18, 0.08, sfxGain);
+      createOsc('sine', 1976, t + 0.16, 0.12, 0.04, sfxGain);
+      playNoise(t + 0.1, 0.06, 0.03, 10000, sfxGain);
+      break;
+    }
+
+    // --- Wrong tap: short dull thud ---
+    case 'wrongTap': {
+      createOsc('square', 200, t, 0.1, 0.06, sfxGain);
+      createOsc('square', 150, t + 0.03, 0.08, 0.04, sfxGain);
+      playNoise(t, 0.03, 0.03, 4000, sfxGain);
+      break;
+    }
+
+    // --- Round start: tension building ---
+    case 'roundStart': {
+      createOsc('sine', 220, t, 0.3, 0.06, sfxGain);
+      createOsc('triangle', 330, t + 0.1, 0.3, 0.04, sfxGain);
+      createOsc('sine', 440, t + 0.2, 0.4, 0.05, sfxGain);
+      playNoise(t, 0.2, 0.02, 3000, sfxGain);
+      break;
+    }
+
+    // --- Miss reveal: soft downward sweep when showing missed products ---
+    case 'missReveal': {
+      createOsc('triangle', 500, t, 0.2, 0.05, sfxGain);
+      createOsc('sine', 350, t + 0.1, 0.3, 0.04, sfxGain);
+      createOsc('sine', 250, t + 0.2, 0.3, 0.03, sfxGain);
+      break;
+    }
+
+    // --- Elimination: descending failure tone ---
+    case 'elimination': {
+      createOsc('sine', 400, t, 0.25, 0.08, sfxGain);
+      createOsc('sine', 250, t + 0.15, 0.3, 0.07, sfxGain);
+      createOsc('sine', 150, t + 0.3, 0.4, 0.06, sfxGain);
+      createOsc('triangle', 100, t + 0.35, 0.5, 0.04, sfxGain);
+      playNoise(t + 0.1, 0.4, 0.03, 2000, sfxGain);
+      break;
+    }
+
+    // --- Perfect round: triumphant flourish ---
+    case 'perfectRound': {
+      [784, 988, 1175, 1568].forEach((freq, i) => {
+        createOsc('sine', freq, t + i * 0.06, 0.15, 0.08, sfxGain);
+      });
+      createOsc('triangle', 2093, t + 0.28, 0.3, 0.06, sfxGain);
+      playNoise(t + 0.2, 0.1, 0.04, 9000, sfxGain);
+      break;
+    }
+
     // --- Mute toggle ---
     case 'toggleOn': {
       createOsc('sine', 440, t, 0.06, 0.05, sfxGain);

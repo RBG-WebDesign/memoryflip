@@ -11,7 +11,11 @@ void main() {
 `;
 
 const fragment = `
-precision highp float;
+#ifdef GL_FRAGMENT_PRECISION_HIGH
+  precision highp float;
+#else
+  precision mediump float;
+#endif
 
 varying vec2 vUv;
 
@@ -66,7 +70,7 @@ vec3 warpTunnel(vec2 fragCoord, float warpAmt){
         0.25 + sin(time * 0.001) * 0.1,
         time * 0.0008 * uWarpDir + uDepth
     );
-    for(int r = 0; r < 70; r++){
+    for(int r = 0; r < 50; r++){
         float depthScale = mix(0.9, 1.4, clamp(warpAmt, 0.0, 1.0));
         vec3 p = init + s * vec3(uv * depthScale, 0.143);
         p.z = mod(p.z,2.0);
@@ -217,10 +221,10 @@ const SpaceBackground = forwardRef((props, ref) => {
     const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+    const isMobile = window.innerWidth <= 768;
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, isMobile ? 1 : 1.5));
     renderer.setSize(window.innerWidth, window.innerHeight);
-    
-    renderer.domElement.style.willChange = 'filter, transform';
+
     container.appendChild(renderer.domElement);
 
     const uniforms = {
@@ -302,9 +306,14 @@ const SpaceBackground = forwardRef((props, ref) => {
 
     animate();
 
+    let resizeRaf = null;
     const handleResize = () => {
-      renderer.setSize(window.innerWidth, window.innerHeight);
-      uniforms.uResolution.value.set(window.innerWidth, window.innerHeight);
+      if (resizeRaf) return;
+      resizeRaf = requestAnimationFrame(() => {
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        uniforms.uResolution.value.set(window.innerWidth, window.innerHeight);
+        resizeRaf = null;
+      });
     };
 
     window.addEventListener('resize', handleResize);
@@ -312,6 +321,7 @@ const SpaceBackground = forwardRef((props, ref) => {
     return () => {
       window.removeEventListener('resize', handleResize);
       cancelAnimationFrame(animationFrameId);
+      if (resizeRaf) cancelAnimationFrame(resizeRaf);
       if (container.contains(renderer.domElement)) {
         container.removeChild(renderer.domElement);
       }
