@@ -52,32 +52,98 @@ export const ALL_ICONS = [
 
 // --- Game Modes ---
 export const GAME_MODES = {
-  ENDLESS: 'ENDLESS',
+  TIMED: 'TIMED',
   SURVIVOR: 'SURVIVOR',
 };
 
+// --- Grand Prize threshold ---
+// Players must reach this total score to qualify for a grand prize (JBL speakers).
+// Set extremely high — requires near-perfect play through 7+ levels.
+export const GRAND_PRIZE_THRESHOLD = 10000;
+
+// Max winners per day — once reached, the grand prize tracker hides for the rest of the day.
+export const GRAND_PRIZE_DAILY_MAX = 2;
+
+// --- Grand Prize daily winner helpers ---
+const GP_STORAGE_KEY = 'galaxy-sync-grand-prize-winners';
+
+function getTodayKey() {
+  return new Date().toISOString().slice(0, 10); // "YYYY-MM-DD"
+}
+
+export function getGrandPrizeWinnersToday() {
+  try {
+    const data = JSON.parse(localStorage.getItem(GP_STORAGE_KEY) || '{}');
+    const today = getTodayKey();
+    return data[today] || [];
+  } catch { return []; }
+}
+
+export function addGrandPrizeWinner(name) {
+  try {
+    const data = JSON.parse(localStorage.getItem(GP_STORAGE_KEY) || '{}');
+    const today = getTodayKey();
+    if (!data[today]) data[today] = [];
+    data[today].push({ name: name || 'Anonymous', time: Date.now() });
+    localStorage.setItem(GP_STORAGE_KEY, JSON.stringify(data));
+  } catch { /* ignore */ }
+}
+
+export function isGrandPrizeAvailable() {
+  if (isGrandPrizeDisabled()) return false;
+  return getGrandPrizeWinnersToday().length < GRAND_PRIZE_DAILY_MAX;
+}
+
+export function resetGrandPrizeToday() {
+  try {
+    const data = JSON.parse(localStorage.getItem(GP_STORAGE_KEY) || '{}');
+    const today = getTodayKey();
+    delete data[today];
+    localStorage.setItem(GP_STORAGE_KEY, JSON.stringify(data));
+  } catch { /* ignore */ }
+}
+
+const GP_DISABLED_KEY = 'galaxy-sync-grand-prize-disabled';
+
+export function isGrandPrizeDisabled() {
+  try {
+    return localStorage.getItem(GP_DISABLED_KEY) === 'true';
+  } catch { return false; }
+}
+
+export function setGrandPrizeDisabled(disabled) {
+  try {
+    if (disabled) {
+      localStorage.setItem(GP_DISABLED_KEY, 'true');
+    } else {
+      localStorage.removeItem(GP_DISABLED_KEY);
+    }
+  } catch { /* ignore */ }
+}
+
 // --- Shared preview-time curve ---
+// Shorter previews = harder memorization, especially on later levels
 function getPreviewTime(level) {
-  if (level === 1) return 4000;
-  if (level === 2) return 3800;
-  const adjusted = level - 2;
-  if (adjusted <= 5) return 3800 - (adjusted - 1) * 200;
-  if (adjusted <= 10) return 3000 - (adjusted - 5) * 140;
-  if (adjusted <= 20) return 2300 - (adjusted - 10) * 80;
-  return Math.max(1300, 1500 - (adjusted - 20) * 20);
+  if (level === 1) return 3500;
+  if (level === 2) return 3000;
+  if (level === 3) return 2800;
+  if (level === 4) return 2200;
+  if (level === 5) return 1800;
+  const adjusted = level - 5;
+  return Math.max(1200, 1800 - adjusted * 100);
 }
 
 // --- Shared pairs/grid curve ---
 function getPairsAndGrid(level) {
-  if (level === 1) return { pairs: 2, gridClass: 'grid-cols-2', timeLimit: 15 };
-  if (level === 2) return { pairs: 3, gridClass: 'grid-cols-2', timeLimit: 20 };
-  if (level === 3) return { pairs: 6, gridClass: 'grid-cols-3', timeLimit: 35 };
-  if (level === 4) return { pairs: 10, gridClass: 'grid-cols-4', timeLimit: 55 };
-  return { pairs: 12, gridClass: 'grid-cols-4', timeLimit: 65 };
+  if (level === 1) return { pairs: 2, gridClass: 'grid-cols-2', timeLimit: 12 };
+  if (level === 2) return { pairs: 3, gridClass: 'grid-cols-2', timeLimit: 15 };
+  if (level === 3) return { pairs: 6, gridClass: 'grid-cols-3', timeLimit: 28 };
+  if (level === 4) return { pairs: 10, gridClass: 'grid-cols-4', timeLimit: 40 };
+  return { pairs: 12, gridClass: 'grid-cols-4', timeLimit: 45 };
 }
 
 // --- Level Config ---
-export function getLevelConfig(level, mode = GAME_MODES.ENDLESS) {
+export function getLevelConfig(level, mode = GAME_MODES.TIMED) {
   const { pairs, gridClass, timeLimit } = getPairsAndGrid(level);
   const previewTime = getPreviewTime(level);
   const base = { pairs, gridClass, previewTime, timeLimit };
@@ -86,7 +152,7 @@ export function getLevelConfig(level, mode = GAME_MODES.ENDLESS) {
     return {
       ...base,
       maxHealth: 100,
-      damagePerMiss: Math.min(12 + (level - 1) * 1.5, 24),
+      damagePerMiss: Math.min(18 + (level - 1) * 2, 30),
     };
   }
 

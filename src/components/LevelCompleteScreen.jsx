@@ -1,18 +1,24 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Trophy, ArrowRight, RotateCcw, Star } from 'lucide-react';
 import { playSound } from '../utils/audio';
+import { GRAND_PRIZE_THRESHOLD, isGrandPrizeAvailable } from '../constants/config';
 
-// --- STAR THRESHOLDS ---
-// Flat thresholds for endless mode — difficulty comes from preview time, not score inflation.
-// Level 1 is gentler (fewer pairs in early design); level 2+ use the standard 6-pair thresholds.
+// --- STAR THRESHOLDS (per level, based on level score only) ---
+// Tuned so 3 stars requires near-perfect play (no mismatches, fast clears).
+// Level 1: 2 pairs → max ~260 perfect. Level 2: 3 pairs → max ~390.
+// Level 3: 6 pairs → max ~780. Level 4: 10 pairs → max ~1300. Level 5: 12 pairs → max ~1560.
 const BASE_STAR_THRESHOLDS = {
-  1: [100, 200, 300],
+  1: [120, 180, 240],
+  2: [150, 250, 350],
+  3: [300, 500, 700],
+  4: [450, 750, 1050],
+  5: [500, 850, 1200],
 };
 
 function getStarThresholds(level) {
   if (BASE_STAR_THRESHOLDS[level]) return BASE_STAR_THRESHOLDS[level];
-  // Flat: same thresholds for every 6-pair board
-  return [200, 400, 600];
+  // Level 6+: very hard thresholds
+  return [550, 900, 1300];
 }
 
 // Legacy compat
@@ -254,8 +260,11 @@ export default function LevelCompleteScreen({
   isMuted = false,
   onAdvance,
   onReturn,
+  onGrandPrize,
 }) {
   const thresholds = STAR_THRESHOLDS[level] || [100, 200, 300];
+  const [grandPrizeAvailable] = useState(() => isGrandPrizeAvailable());
+  const grandPrizeEarned = grandPrizeAvailable && score >= GRAND_PRIZE_THRESHOLD;
 
   const {
     displayScore,
@@ -405,41 +414,90 @@ export default function LevelCompleteScreen({
             </div>
           </div>
 
+          {/* Grand Prize tracker — hidden once daily cap (2 winners) is reached */}
+          {!isTallying && grandPrizeAvailable && (
+            <div className={`rounded-2xl px-4 py-3 mb-4 ${grandPrizeEarned ? 'bg-yellow-500/10 border border-yellow-500/30' : 'bg-[#0A0A0A] border border-[#2A2A2A]'}`}>
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-[10px] text-gray-500 tracking-widest uppercase font-medium">Grand Prize Goal</span>
+                <span className="text-[10px] font-mono text-gray-400">{displayScore} / {GRAND_PRIZE_THRESHOLD}</span>
+              </div>
+              <div className="w-full h-1.5 bg-[#1A1A1A] rounded-full overflow-hidden">
+                <div
+                  className="h-full rounded-full transition-all duration-700 ease-out"
+                  style={{
+                    width: `${Math.min(100, (displayScore / GRAND_PRIZE_THRESHOLD) * 100)}%`,
+                    background: grandPrizeEarned
+                      ? 'linear-gradient(90deg, #facc15, #f59e0b)'
+                      : 'linear-gradient(90deg, #0689D8, #6c3ce0)',
+                  }}
+                />
+              </div>
+              {grandPrizeEarned ? (
+                <p className="text-yellow-400 text-[10px] mt-1.5 font-semibold tracking-wider animate-pulse">GRAND PRIZE QUALIFIED!</p>
+              ) : (
+                <p className="text-gray-600 text-[10px] mt-1.5">{GRAND_PRIZE_THRESHOLD - displayScore} pts to qualify</p>
+              )}
+            </div>
+          )}
+
           <div className="flex justify-center mb-6">
             <div className={`lcs-result-pill ${earnedStars === 3 && !isTallying ? 'lcs-result-gold' : ''}`}>
               {isTallying
                 ? 'Tallying'
-                : earnedStars === 3
-                  ? 'Top Clear'
-                  : earnedStars === 2
-                    ? 'Strong Clear'
-                    : earnedStars === 1
-                      ? 'Clear'
-                      : 'Below Threshold'}
+                : grandPrizeEarned
+                  ? 'Grand Prize Winner!'
+                  : earnedStars === 3
+                    ? 'Top Clear'
+                    : earnedStars === 2
+                      ? 'Strong Clear'
+                      : earnedStars === 1
+                        ? 'Clear'
+                        : 'Below Threshold'}
             </div>
           </div>
 
-          <button
-            onClick={() => !isTallying && onAdvance?.()}
-            disabled={isTallying}
-            className={`w-full flex items-center justify-center bg-gradient-to-r from-[#00b4d8] to-[#6c3ce0] text-white py-4 px-6 rounded-2xl font-semibold tracking-wide transition-all duration-300 shadow-[0_4px_15px_rgba(0,180,216,0.3)] ${
-              isTallying
-                ? 'opacity-50 cursor-not-allowed grayscale'
-                : 'hover:from-[#00d4ff] hover:to-[#9b30ff] hover:shadow-[0_6px_25px_rgba(0,180,216,0.5)] hover:-translate-y-1'
-            }`}
-          >
-            Advance to Level {level + 1}
-            <ArrowRight size={18} className="ml-2" />
-          </button>
-          <button
-            onClick={() => !isTallying && onReturn?.()}
-            disabled={isTallying}
-            className={`w-full flex items-center justify-center text-gray-400 hover:text-white py-2 px-6 rounded-xl text-sm tracking-wide transition-all duration-300 mt-2 ${
-              isTallying ? 'opacity-50 cursor-not-allowed' : ''
-            }`}
-          >
-            End Run & Save Score
-          </button>
+          {/* Grand Prize claim button — replaces normal buttons when earned */}
+          {grandPrizeEarned && !isTallying ? (
+            <>
+              <button
+                onClick={() => onGrandPrize?.()}
+                className="w-full flex items-center justify-center bg-gradient-to-r from-yellow-500 to-amber-600 text-black py-4 px-6 rounded-2xl font-bold tracking-wide transition-all duration-300 shadow-[0_4px_20px_rgba(250,204,21,0.3)] hover:shadow-[0_6px_30px_rgba(250,204,21,0.5)] hover:-translate-y-1 mb-2"
+              >
+                <Trophy size={18} className="mr-2" />
+                Claim Grand Prize
+              </button>
+              <button
+                onClick={() => onAdvance?.()}
+                className="w-full flex items-center justify-center text-gray-400 hover:text-white py-2 px-6 rounded-xl text-sm tracking-wide transition-all duration-300"
+              >
+                Keep Playing
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                onClick={() => !isTallying && onAdvance?.()}
+                disabled={isTallying}
+                className={`w-full flex items-center justify-center bg-gradient-to-r from-[#00b4d8] to-[#6c3ce0] text-white py-4 px-6 rounded-2xl font-semibold tracking-wide transition-all duration-300 shadow-[0_4px_15px_rgba(0,180,216,0.3)] ${
+                  isTallying
+                    ? 'opacity-50 cursor-not-allowed grayscale'
+                    : 'hover:from-[#00d4ff] hover:to-[#9b30ff] hover:shadow-[0_6px_25px_rgba(0,180,216,0.5)] hover:-translate-y-1'
+                }`}
+              >
+                Advance to Level {level + 1}
+                <ArrowRight size={18} className="ml-2" />
+              </button>
+              <button
+                onClick={() => !isTallying && onReturn?.()}
+                disabled={isTallying}
+                className={`w-full flex items-center justify-center text-gray-400 hover:text-white py-2 px-6 rounded-xl text-sm tracking-wide transition-all duration-300 mt-2 ${
+                  isTallying ? 'opacity-50 cursor-not-allowed' : ''
+                }`}
+              >
+                End Run & Save Score
+              </button>
+            </>
+          )}
         </div>
       </div>
     </div>

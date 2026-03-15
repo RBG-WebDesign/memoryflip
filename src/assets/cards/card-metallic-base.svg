@@ -1,66 +1,30 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="96 32 320 448" role="img" aria-labelledby="title desc">
-  <title id="title">Metallic Card Base</title>
-  <desc id="desc">Playing card base with a black metallic border and silver gray metallic interior.</desc>
+  <title id="title">Card Base</title>
+  <desc id="desc">Playing card base with a black surface and subtle dark border.</desc>
   <defs>
     <linearGradient id="borderMetal" x1="96" y1="56" x2="416" y2="456" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#62666c"/>
-      <stop offset="0.12" stop-color="#191b1f"/>
-      <stop offset="0.3" stop-color="#454a52"/>
-      <stop offset="0.5" stop-color="#050608"/>
-      <stop offset="0.72" stop-color="#3c4047"/>
-      <stop offset="0.88" stop-color="#111317"/>
-      <stop offset="1" stop-color="#5b6169"/>
-    </linearGradient>
-    <linearGradient id="innerMetal" x1="124" y1="60" x2="388" y2="452" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#fdfefe"/>
-      <stop offset="0.08" stop-color="#d7dee7"/>
-      <stop offset="0.18" stop-color="#ffffff"/>
-      <stop offset="0.32" stop-color="#bcc6d1"/>
-      <stop offset="0.48" stop-color="#eef3f8"/>
-      <stop offset="0.62" stop-color="#9ca7b5"/>
-      <stop offset="0.78" stop-color="#f8fbfd"/>
-      <stop offset="1" stop-color="#8b95a3"/>
+      <stop offset="0" stop-color="#1a1a1a"/>
+      <stop offset="0.5" stop-color="#0a0a0a"/>
+      <stop offset="1" stop-color="#1a1a1a"/>
     </linearGradient>
     <linearGradient id="innerShade" x1="142" y1="96" x2="370" y2="416" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#ffffff" stop-opacity="0.86"/>
-      <stop offset="0.22" stop-color="#ffffff" stop-opacity="0.1"/>
-      <stop offset="0.58" stop-color="#5e6874" stop-opacity="0.1"/>
-      <stop offset="1" stop-color="#000000" stop-opacity="0.22"/>
-    </linearGradient>
-    <radialGradient id="centerGlow" cx="50%" cy="38%" r="58%">
-      <stop offset="0" stop-color="#ffffff" stop-opacity="0.84"/>
-      <stop offset="0.28" stop-color="#f6fbff" stop-opacity="0.34"/>
-      <stop offset="0.5" stop-color="#dfe5ee" stop-opacity="0.18"/>
-      <stop offset="1" stop-color="#7e8794" stop-opacity="0"/>
-    </radialGradient>
-    <linearGradient id="chromeBand" x1="124" y1="256" x2="388" y2="256" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#a8b1bc" stop-opacity="0.18"/>
-      <stop offset="0.14" stop-color="#ffffff" stop-opacity="0.78"/>
-      <stop offset="0.3" stop-color="#b2bcc7" stop-opacity="0.16"/>
-      <stop offset="0.5" stop-color="#ffffff" stop-opacity="0.92"/>
-      <stop offset="0.7" stop-color="#aab4c0" stop-opacity="0.18"/>
-      <stop offset="0.86" stop-color="#ffffff" stop-opacity="0.72"/>
-      <stop offset="1" stop-color="#97a1ad" stop-opacity="0.18"/>
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.03"/>
+      <stop offset="0.5" stop-color="#ffffff" stop-opacity="0"/>
+      <stop offset="1" stop-color="#000000" stop-opacity="0.15"/>
     </linearGradient>
     <linearGradient id="topSheen" x1="124" y1="60" x2="124" y2="180" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#ffffff" stop-opacity="0.6"/>
-      <stop offset="0.45" stop-color="#ffffff" stop-opacity="0.12"/>
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.06"/>
       <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
     </linearGradient>
-    <filter id="cardShadow" x="-30%" y="-30%" width="160%" height="180%">
-      <feDropShadow dx="0" dy="18" stdDeviation="18" flood-color="#000000" flood-opacity="0.24"/>
-    </filter>
   </defs>
 
   <g>
     <rect x="96" y="32" width="320" height="448" fill="url(#borderMetal)"/>
-    <rect x="108" y="44" width="296" height="424" fill="#090a0c"/>
-    <rect x="124" y="60" width="264" height="392" fill="url(#innerMetal)"/>
-    <rect x="124" y="60" width="264" height="392" fill="url(#centerGlow)"/>
-    <rect x="124" y="60" width="264" height="392" fill="url(#chromeBand)"/>
+    <rect x="108" y="44" width="296" height="424" fill="#050505"/>
+    <rect x="124" y="60" width="264" height="392" fill="#0a0a0a"/>
     <rect x="124" y="60" width="264" height="120" fill="url(#topSheen)"/>
     <rect x="124" y="60" width="264" height="392" fill="url(#innerShade)"/>
-    <rect x="137" y="74" width="238" height="364" fill="none" stroke="#ffffff" stroke-opacity="0.36" stroke-width="2.5"/>
-    <rect x="96.5" y="32.5" width="319" height="447" fill="none" stroke="#8f98a3" stroke-opacity="0.35"/>
+    <rect x="137" y="74" width="238" height="364" fill="none" stroke="#ffffff" stroke-opacity="0.06" stroke-width="1.5"/>
+    <rect x="96.5" y="32.5" width="319" height="447" fill="none" stroke="#333333" stroke-opacity="0.25"/>
   </g>
 </svg>

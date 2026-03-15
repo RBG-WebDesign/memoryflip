@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Trophy, Play, RotateCcw, Volume2, VolumeX, Home, Settings, X, Music, Zap, Heart, Shield } from 'lucide-react';
+import { Trophy, Play, Volume2, VolumeX, Home, Settings, X, Music, Zap, Heart, Shield } from 'lucide-react';
 import SpaceBackground from './components/background/SpaceBackground';
 import LevelCompleteScreen from './components/LevelCompleteScreen';
-import { ALL_ICONS, LEVEL_CONFIG, GAME_MODES, getLevelConfig } from './constants/config';
-import { playSound, initAudio, startMusic, stopMusic, setMusicVolume, setSfxVolume } from './utils/audio';
+import { ALL_ICONS, LEVEL_CONFIG, GAME_MODES, getLevelConfig, GRAND_PRIZE_THRESHOLD, isGrandPrizeAvailable, addGrandPrizeWinner, resetGrandPrizeToday, isGrandPrizeDisabled, setGrandPrizeDisabled, getGrandPrizeWinnersToday, GRAND_PRIZE_DAILY_MAX } from './constants/config';
+import GrandPrizeScreen from './components/GrandPrizeScreen';
+import { playSound, initAudio, startMusic, stopMusic, setMusicVolume, setSfxVolume, distortAndStopMusic, playGameOverJingle } from './utils/audio';
 import { shuffleArray, formatTime } from './utils/helpers';
 import samsungLogo from './assets/logo/Samsung_Orig_Wordmark_WHITE_RGB.png';
 import cardMetallicBase from './assets/cards/card-metallic-base.svg';
@@ -39,19 +40,25 @@ export default function App() {
   const [musicVol, setMusicVol] = useState(0.75);
   const [sfxVol, setSfxVol] = useState(0.7);
   const [audioReady, setAudioReady] = useState(false);
-  const [gameMode, setGameMode] = useState(GAME_MODES.ENDLESS);
-  const [leaderboardTab, setLeaderboardTab] = useState(GAME_MODES.ENDLESS);
+  const [gameMode, setGameMode] = useState(GAME_MODES.TIMED);
+  const [leaderboardTab, setLeaderboardTab] = useState(GAME_MODES.TIMED);
   const [health, setHealth] = useState(100);
   const [maxHealth, setMaxHealth] = useState(100);
   const [tookDamage, setTookDamage] = useState(false);
   const [playerName, setPlayerName] = useState('');
+  const [rankRevealData, setRankRevealData] = useState(null);
+  const [displayRank, setDisplayRank] = useState(0);
+  const [gpDisabled, setGpDisabled] = useState(() => isGrandPrizeDisabled());
+  const [gpWinnersToday, setGpWinnersToday] = useState(() => getGrandPrizeWinnersToday().length);
 
   const timerRef = useRef(null);
   const mismatchTimeoutRef = useRef(null);
+  const rankAnimRef = useRef(null);
   const enterKeyRef = useRef(0);
   const bgRef = useRef(null);
   const scatterDirsRef = useRef([]);
   const pendingScoreRef = useRef(null);
+  const playerRowRef = useRef(null);
   const prefersReducedMotion = useRef(
     typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
   );
@@ -68,16 +75,18 @@ export default function App() {
     });
   };
 
+  const MAX_LEADERBOARD_ENTRIES = 500;
+
   const saveScore = useCallback((finalScore, mode, lvl, name) => {
     setLeaderboard(prev => {
       const entry = {
         name: name || 'Anonymous',
         score: finalScore,
         date: new Date().toLocaleDateString(),
-        mode: mode || GAME_MODES.ENDLESS,
+        mode: mode || GAME_MODES.TIMED,
         level: lvl || 1,
       };
-      return [...prev, entry].sort((a, b) => b.score - a.score);
+      return [...prev, entry].sort((a, b) => b.score - a.score).slice(0, MAX_LEADERBOARD_ENTRIES);
     });
   }, []);
 
@@ -100,7 +109,7 @@ export default function App() {
     const activeMode = mode ?? gameMode;
     initAudio();
     setAudioReady(true);
-    if (mismatchTimeoutRef.current) clearTimeout(mismatchTimeoutRef.current);
+    if (mismatchTimeoutRef.current) { clearTimeout(mismatchTimeoutRef.current); mismatchTimeoutRef.current = null; }
     const config = getLevelConfig(targetLevel, activeMode);
     // Pick random icons each level for variety
     const selectedIcons = shuffleArray([...ALL_ICONS]).slice(0, config.pairs);
@@ -111,6 +120,7 @@ export default function App() {
     setFlippedIndices([]);
     setMismatchedIndices([]);
     setMatches(0);
+    setCombo(0);
     setTime(config.timeLimit ?? 60);
     setIsLocked(true);
     setIsEntering(true);
@@ -171,8 +181,49 @@ export default function App() {
 
   // --- Persist leaderboard to localStorage ---
   useEffect(() => {
-    try { localStorage.setItem('galaxy-sync-leaderboard', JSON.stringify(leaderboard)); } catch {}
+    try {
+      localStorage.setItem('galaxy-sync-leaderboard', JSON.stringify(leaderboard));
+    } catch (e) {
+      console.warn('Failed to save leaderboard to localStorage:', e.message);
+    }
   }, [leaderboard]);
+
+  // --- Rank reveal count-up animation ---
+  useEffect(() => {
+    if (gameState !== 'RANK_REVEAL' || !rankRevealData) return;
+    const targetRank = rankRevealData.rank;
+    if (targetRank <= 1) { setDisplayRank(targetRank); return; }
+    const duration = Math.min(600 + targetRank * 4, 1500);
+    const start = performance.now();
+    let lastSound = 0;
+    const animate = (now) => {
+      const elapsed = now - start;
+      const progress = Math.min(elapsed / duration, 1);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      const current = Math.max(1, Math.round(eased * targetRank));
+      setDisplayRank(current);
+      if (now - lastSound > 80 && current < targetRank) {
+        lastSound = now;
+      }
+      if (progress < 1) {
+        rankAnimRef.current = requestAnimationFrame(animate);
+      } else {
+        rankAnimRef.current = null;
+        playSound('correct', isMuted);
+      }
+    };
+    rankAnimRef.current = requestAnimationFrame(animate);
+    return () => { if (rankAnimRef.current) cancelAnimationFrame(rankAnimRef.current); };
+  }, [gameState, rankRevealData, isMuted]);
+
+  // --- Auto-scroll to player's row in rank reveal ---
+  useEffect(() => {
+    if (gameState !== 'RANK_REVEAL' || !rankRevealData || rankRevealData.rank > 50) return;
+    const timer = setTimeout(() => {
+      playerRowRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 1200);
+    return () => clearTimeout(timer);
+  }, [gameState, rankRevealData]);
 
   // --- Splash screen dismiss: unlocks audio + transitions to menu with music ---
   const handleSplashDismiss = useCallback(() => {
@@ -190,8 +241,15 @@ export default function App() {
       return;
     }
 
+    // Silent screens — stop any leftover music, don't start new
+    if (gameState === 'GAME_OVER' || gameState === 'NAME_INPUT' || gameState === 'RANK_REVEAL') {
+      stopMusic();
+      return;
+    }
+
     const isInGame = gameState === 'PREVIEW' || gameState === 'PLAYING' ||
-      gameState === 'LEVEL_COMPLETE' || gameState === 'SCATTERING' || gameState === 'GAME_OVER';
+      gameState === 'LEVEL_COMPLETE' || gameState === 'SCATTERING' ||
+      gameState === 'GRAND_PRIZE';
 
     if (isInGame) {
       startMusic('ingame');
@@ -209,20 +267,32 @@ export default function App() {
     return () => clearInterval(timerRef.current);
   }, [gameState, isCelebrating]);
 
+  // Keep refs for values needed in game-over to avoid stale closures
+  const scoreRef = useRef(score);
+  const gameModeRef = useRef(gameMode);
+  const levelRef = useRef(level);
+  useEffect(() => { scoreRef.current = score; }, [score]);
+  useEffect(() => { gameModeRef.current = gameMode; }, [gameMode]);
+  useEffect(() => { levelRef.current = level; }, [level]);
+
   // Time's up — game over
   useEffect(() => {
     if (gameState !== 'PLAYING' || time > 0 || isCelebrating) return;
+    if (mismatchTimeoutRef.current) { clearTimeout(mismatchTimeoutRef.current); mismatchTimeoutRef.current = null; }
     setIsLocked(true);
     bgRef.current?.gameOver?.();
-    setTimeout(() => {
-      if (score > 0) {
-        pendingScoreRef.current = { score, mode: gameMode, level };
-      }
-      triggerTransition(() => {
-        setGameState('GAME_OVER');
-      }, 'menu');
-    }, 800);
-  }, [time, gameState, isCelebrating, score, gameMode, level, triggerTransition]);
+    // Distort & slow the music, then play loser jingle and transition
+    distortAndStopMusic(() => {
+      playGameOverJingle(isMuted);
+      setTimeout(() => {
+        pendingScoreRef.current = { score: scoreRef.current, mode: gameModeRef.current, level: levelRef.current };
+        triggerTransition(() => {
+          setIsLocked(false);
+          setGameState('GAME_OVER');
+        }, 'menu');
+      }, 800);
+    });
+  }, [time, gameState, isCelebrating, triggerTransition, isMuted]);
 
   useEffect(() => {
     if (flippedIndices.length === 2 && !isLocked) {
@@ -236,8 +306,9 @@ export default function App() {
         if (nextCombo === 2) setTimeout(() => playSound('combo2', isMuted), 200);
         else if (nextCombo === 3) setTimeout(() => playSound('combo3', isMuted), 200);
         else if (nextCombo >= 4) setTimeout(() => playSound('combo4plus', isMuted), 200);
-        const speedBonus = Math.min(50, Math.round(time * 2));
-        const pointsEarned = 100 + (combo * 50) + speedBonus;
+        const speedBonus = Math.min(30, Math.round(time * 0.8));
+        const comboBonus = Math.min(combo * 30, 120);
+        const pointsEarned = 100 + comboBonus + speedBonus;
         setScore(s => s + pointsEarned);
         setCombo(c => c + 1);
         setMatches(m => m + 1);
@@ -255,7 +326,7 @@ export default function App() {
         playSound('mismatch', isMuted);
         bgRef.current?.wrong();
         setCombo(0);
-        setScore(s => Math.max(0, s - 20));
+        setScore(s => Math.max(0, s - 50));
         setMismatchedIndices([firstIndex, secondIndex]);
         if (gameMode === GAME_MODES.SURVIVOR) {
           const config = getLevelConfig(level, gameMode);
@@ -296,20 +367,28 @@ export default function App() {
   useEffect(() => {
     if (gameMode !== GAME_MODES.SURVIVOR) return;
     if (health > 0 || gameState !== 'PLAYING') return;
+    if (mismatchTimeoutRef.current) { clearTimeout(mismatchTimeoutRef.current); mismatchTimeoutRef.current = null; }
     setIsLocked(true);
     bgRef.current?.gameOver?.();
-    setTimeout(() => {
-      if (score > 0) {
-        pendingScoreRef.current = { score, mode: gameMode, level };
-      }
-      triggerTransition(() => {
-        setGameState('GAME_OVER');
-      }, 'menu');
-    }, 800);
-  }, [health, gameMode, gameState, score, triggerTransition]);
+    // Distort & slow the music, then play loser jingle and transition
+    distortAndStopMusic(() => {
+      playGameOverJingle(isMuted);
+      setTimeout(() => {
+        pendingScoreRef.current = { score: scoreRef.current, mode: gameModeRef.current, level: levelRef.current };
+        triggerTransition(() => {
+          setIsLocked(false);
+          setGameState('GAME_OVER');
+        }, 'menu');
+      }, 800);
+    });
+  }, [health, gameMode, gameState, triggerTransition]);
+
+  const flippedCountRef = useRef(0);
+  useEffect(() => { flippedCountRef.current = flippedIndices.length; }, [flippedIndices]);
 
   const handleCardClick = (index) => {
-    if (isLocked || flippedIndices.length >= 2 || deck[index].isFlipped || deck[index].isMatched) return;
+    if (isLocked || flippedCountRef.current >= 2 || flippedIndices.length >= 2 || deck[index].isFlipped || deck[index].isMatched) return;
+    flippedCountRef.current += 1;
     playSound('flip', isMuted);
     setDeck(prev => {
       const newDeck = [...prev];
@@ -339,7 +418,7 @@ export default function App() {
   const renderMenu = () => (
     <div className="start-screen">
       <div className="start-screen__content">
-        <div className="start-screen__brand" aria-hidden="true">
+        <div className="start-screen__brand mb-1" aria-hidden="true">
           <img
             src={samsungLogo}
             alt="Samsung"
@@ -348,8 +427,8 @@ export default function App() {
         </div>
         <div className="start-screen__title-section">
           <h1 className="start-screen__title">
-            <span className="start-screen__title-game">GALAXY</span>
-            <span className="start-screen__title-flip">SYNC</span>
+            <span className="start-screen__title-game">MEMORY</span>
+            <span className="start-screen__title-flip">FLIP</span>
           </h1>
           <p className="start-screen__subtitle">
             Test your memory, beat the clock
@@ -363,7 +442,7 @@ export default function App() {
         <div className="start-screen__menu">
           <button
             className="start-screen__btn start-screen__btn--primary"
-            onClick={() => { playSound('menuSelect', isMuted); setGameMode(GAME_MODES.ENDLESS); triggerTransition(() => { setScore(0); setCombo(0); setScoreAtLevelStart(0); setHealth(100); setMaxHealth(100); setupLevel(1, GAME_MODES.ENDLESS); }, 'start'); }}
+            onClick={() => { playSound('menuSelect', isMuted); setGameMode(GAME_MODES.TIMED); triggerTransition(() => { setScore(0); setCombo(0); setScoreAtLevelStart(0); setHealth(100); setMaxHealth(100); setupLevel(1, GAME_MODES.TIMED); }, 'start'); }}
           >
             <span className="start-screen__btn-glow" aria-hidden="true" />
             <span className="start-screen__btn-inner">
@@ -388,7 +467,7 @@ export default function App() {
           <button className="start-screen__btn start-screen__btn--secondary" onClick={() => { playSound('click', isMuted); initAudio(); setAudioReady(true); triggerTransition(() => setGameState('LEADERBOARD'), 'none'); }}>
             <span className="start-screen__btn-inner">
               <span className="start-screen__btn-icon" aria-hidden="true">
-                <Trophy size={18} />
+                <Trophy size={18} className="text-[#0689D8] drop-shadow-[0_0_6px_rgba(6,137,216,0.5)]" />
               </span>
               Leaderboard
             </span>
@@ -406,75 +485,205 @@ export default function App() {
     </div>
   );
 
+  const renderPodium = (entries) => {
+    const top3 = entries.slice(0, 3);
+    if (top3.length === 0) return null;
+    const medals = [
+      { border: 'border-yellow-400/40', bg: 'podium-card-gold', text: 'text-yellow-400', glow: 'podium-gold', label: '1st', icon: '👑' },
+      { border: 'border-gray-300/30', bg: 'podium-card-silver', text: 'text-gray-300', glow: 'podium-silver', label: '2nd', icon: '' },
+      { border: 'border-amber-500/30', bg: 'podium-card-bronze', text: 'text-amber-500', glow: 'podium-bronze', label: '3rd', icon: '' },
+    ];
+    const order = top3.length >= 3 ? [1, 0, 2] : top3.length === 2 ? [1, 0] : [0];
+    return (
+      <div className="flex items-end justify-center gap-3 sm:gap-4 mb-5 sm:mb-6 rank-reveal-podium">
+        {order.map(idx => {
+          const entry = top3[idx];
+          const medal = medals[idx];
+          if (!entry) return null;
+          const isFirst = idx === 0;
+          return (
+            <div key={idx} className={`podium-card flex flex-col items-center justify-end ${isFirst ? 'w-28 sm:w-32 md:w-36' : 'w-22 sm:w-26 md:w-28'} ${isFirst ? 'podium-card--first' : ''} ${medal.bg} border ${medal.border} rounded-2xl ${medal.glow} p-3 sm:p-4 transition-all`}
+              style={{ minHeight: isFirst ? '140px' : idx === 1 ? '115px' : '100px' }}
+            >
+              {isFirst && <span className="text-xl mb-1">{medal.icon}</span>}
+              <span className={`text-xs sm:text-sm font-bold ${medal.text} mb-1.5 tracking-wider`}>{medal.label}</span>
+              <span className="text-white text-xs sm:text-sm font-semibold truncate w-full text-center drop-shadow-[0_1px_2px_rgba(0,0,0,0.5)]">{entry.name || 'Anonymous'}</span>
+              <span className="text-gray-300 text-[10px] sm:text-xs font-mono mt-1 tracking-wide">{entry.score} <span className="text-gray-500 text-[9px]">pts</span></span>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
+  const renderLeaderboardEntry = (entry, i, isSurvivor, highlightEntry = null) => {
+    const isPlayer = highlightEntry && entry.name === highlightEntry.name && entry.score === highlightEntry.score && entry.date === highlightEntry.date;
+    return (
+      <div
+        key={`${i}-${entry.name}`}
+        ref={isPlayer ? playerRowRef : undefined}
+        className={`lb-row flex justify-between items-center text-xs sm:text-sm py-3 px-3 sm:px-4 rounded-xl transition-colors ${
+          isPlayer ? 'lb-row--player' : i % 2 === 0 ? 'bg-white/[0.02]' : 'bg-transparent'
+        }`}
+      >
+        <div className="flex items-center min-w-0 gap-2.5 sm:gap-3">
+          <span className={`lb-rank-badge shrink-0 ${
+            i === 0 ? 'lb-rank--gold' : i === 1 ? 'lb-rank--silver' : i === 2 ? 'lb-rank--bronze' : ''
+          }`}>
+            {i + 1}
+          </span>
+          <span className="flex flex-col min-w-0">
+            <span className="text-white/90 font-semibold truncate flex items-center gap-2 text-xs sm:text-sm">
+              {entry.name || 'Anonymous'}
+              {isPlayer && <span className="lb-you-pill shrink-0">YOU</span>}
+            </span>
+            <span className="text-[10px] sm:text-[11px] text-gray-500 mt-0.5">{entry.date}{isSurvivor && entry.level ? ` · Level ${entry.level}` : ''}</span>
+          </span>
+        </div>
+        <span className="font-mono font-bold text-white tracking-wider text-sm sm:text-base shrink-0 ml-3">{entry.score}<span className="text-[10px] sm:text-xs font-normal text-gray-500 ml-1">pts</span></span>
+      </div>
+    );
+  };
+
   const renderLeaderboard = () => {
-    const filtered = leaderboard
-      .filter(e => (e.mode || GAME_MODES.ENDLESS) === leaderboardTab)
-      .slice(0, 5);
-    const isEndless = leaderboardTab === GAME_MODES.ENDLESS;
+    const allFiltered = leaderboard.filter(e => (e.mode || GAME_MODES.TIMED) === leaderboardTab);
+    const filtered = allFiltered.slice(0, 50);
+    const isTimed = leaderboardTab === GAME_MODES.TIMED;
     const isSurvivor = leaderboardTab === GAME_MODES.SURVIVOR;
 
     return (
       <div className="start-screen">
-        <div className="start-screen__content z-10 w-full max-w-md">
+        <div className="start-screen__content z-10 w-full max-w-lg lb-screen">
+          {/* Header */}
           <div className="text-center mb-5 sm:mb-6">
-            <h2 className="text-2xl sm:text-3xl md:text-4xl font-light text-white tracking-wide mb-2">
-              Top <span className="text-[#0689D8] font-bold">Scores</span>
+            <div className="lb-title-icon mb-3">
+              <Trophy size={28} className="text-[#0689D8]" />
+            </div>
+            <h2 className="text-3xl sm:text-4xl md:text-5xl font-bold text-white tracking-wide mb-2">
+              Top <span className="text-[#0689D8]">Scores</span>
             </h2>
-            <p className="text-gray-400 text-xs sm:text-sm tracking-widest uppercase">Ecosystem Leaders</p>
+            <p className="text-gray-400 text-xs sm:text-sm tracking-[0.25em] uppercase font-medium">Ecosystem Leaders</p>
           </div>
 
-          {/* Mode tabs */}
-          <div className="flex gap-2 mb-4 sm:mb-5 w-full">
+          {/* Tab switcher */}
+          <div className="lb-tab-switcher mb-5 sm:mb-6">
             <button
-              onClick={() => { playSound('click', isMuted); setLeaderboardTab(GAME_MODES.ENDLESS); }}
-              className={`flex-1 py-2.5 px-3 rounded-xl text-[10px] sm:text-xs font-semibold tracking-[0.15em] uppercase transition-all duration-200 border ${
-                isEndless
-                  ? 'bg-[#0689D8]/15 border-[#0689D8]/30 text-[#0689D8]'
-                  : 'bg-white/[0.03] border-white/[0.06] text-gray-500 hover:bg-white/[0.06] hover:text-gray-300'
-              }`}
+              onClick={() => { playSound('click', isMuted); setLeaderboardTab(GAME_MODES.TIMED); }}
+              className={`lb-tab ${isTimed ? 'lb-tab--active-timed' : ''}`}
             >
+              <Zap size={14} className="shrink-0" />
               Timed
             </button>
             <button
               onClick={() => { playSound('click', isMuted); setLeaderboardTab(GAME_MODES.SURVIVOR); }}
-              className={`flex-1 py-2.5 px-3 rounded-xl text-[10px] sm:text-xs font-semibold tracking-[0.15em] uppercase transition-all duration-200 border ${
-                isSurvivor
-                  ? 'bg-red-500/15 border-red-500/30 text-red-400'
-                  : 'bg-white/[0.03] border-white/[0.06] text-gray-500 hover:bg-white/[0.06] hover:text-gray-300'
-              }`}
+              className={`lb-tab ${isSurvivor ? 'lb-tab--active-survivor' : ''}`}
             >
+              <Shield size={14} className="shrink-0" />
               Survivor
             </button>
           </div>
 
-          <div className="w-full bg-[#1A1A1A]/80 border border-[#2A2A2A] backdrop-blur-md rounded-2xl p-4 sm:p-6 mb-6 sm:mb-8 shadow-2xl">
-            {filtered.length > 0 ? (
-              <div className="space-y-3 sm:space-y-4">
-                {filtered.map((entry, i) => (
-                  <div key={i} className="flex justify-between items-center text-xs sm:text-sm border-b border-white/5 pb-3 last:border-0 last:pb-0">
-                    <div className="flex items-center text-gray-400">
-                      <span className={`w-5 h-5 sm:w-6 sm:h-6 rounded-full flex items-center justify-center mr-2 sm:mr-3 font-bold text-[10px] sm:text-xs ${i === 0 ? 'bg-yellow-500/20 text-yellow-500' : i === 1 ? 'bg-gray-400/20 text-gray-300' : i === 2 ? 'bg-amber-700/20 text-amber-600' : 'bg-white/5 text-gray-500'}`}>
-                        {i + 1}
-                      </span>
-                      <span className="flex flex-col">
-                        <span className="text-white font-medium">{entry.name || 'Anonymous'}</span>
-                        <span className="text-[9px] text-gray-600">{entry.date}{isSurvivor && entry.level ? ` · Level ${entry.level}` : ''}</span>
-                      </span>
-                    </div>
-                    <span className="font-mono font-bold text-white tracking-wider text-xs sm:text-sm">{entry.score} <span className="text-[10px] sm:text-xs font-normal text-gray-500">pts</span></span>
-                  </div>
-                ))}
+          {renderPodium(allFiltered)}
+
+          {/* List panel */}
+          <div className="lb-list-panel mb-5 sm:mb-6">
+            {filtered.length > 3 ? (
+              <div className="max-h-[45vh] sm:max-h-[380px] overflow-y-auto leaderboard-scroll space-y-1 p-1">
+                {filtered.slice(3).map((entry, i) => renderLeaderboardEntry(entry, i + 3, isSurvivor))}
+              </div>
+            ) : filtered.length > 0 ? (
+              <div className="text-center text-gray-400 py-5 sm:py-6 text-sm">
+                All scores shown on the podium above.
               </div>
             ) : (
-              <div className="text-center text-gray-500 py-6 sm:py-8 text-sm">
-                No {isSurvivor ? 'Survivor' : 'Timed'} scores yet.
+              <div className="text-center py-8 sm:py-10">
+                <div className="text-gray-600 text-2xl mb-3">🏆</div>
+                <p className="text-gray-400 text-sm font-medium mb-1">No {isSurvivor ? 'Survivor' : 'Timed'} scores yet</p>
+                <p className="text-gray-600 text-xs">Play a round to claim your spot!</p>
               </div>
             )}
+            {allFiltered.length > 50 && (
+              <p className="text-gray-500 text-[10px] text-center mt-3 tracking-wider font-mono">{allFiltered.length} total entries</p>
+            )}
           </div>
+
+          {/* CTA */}
           <button className="start-screen__btn start-screen__btn--secondary w-full" onClick={() => { playSound('click', isMuted); triggerTransition(() => setGameState('MENU'), 'none'); }}>
             <span className="start-screen__btn-inner">
-              <span className="start-screen__btn-icon" aria-hidden="true"><RotateCcw size={18} /></span>
+              <span className="start-screen__btn-icon" aria-hidden="true"><Home size={18} /></span>
               Back to Main Menu
+            </span>
+          </button>
+        </div>
+      </div>
+    );
+  };
+
+  const renderRankReveal = () => {
+    if (!rankRevealData) return null;
+    const { rank, entry, mode } = rankRevealData;
+    const isSurvivor = mode === GAME_MODES.SURVIVOR;
+    const allForMode = leaderboard.filter(e => (e.mode || GAME_MODES.TIMED) === mode);
+    const top50 = allForMode.slice(0, 50);
+    const inTop50 = rank <= 50;
+    const accentColor = isSurvivor ? '#ef4444' : '#0689D8';
+
+    return (
+      <div className="start-screen">
+        <div className="start-screen__content z-10 w-full max-w-lg lb-screen">
+          {/* Header */}
+          <div className="text-center mb-4 sm:mb-5">
+            <p className="text-gray-400 text-[10px] sm:text-xs tracking-[0.3em] uppercase font-medium mb-2">
+              {isSurvivor ? 'Survivor' : 'Timed'} Mode
+            </p>
+            <h2 className="text-3xl sm:text-4xl md:text-5xl font-bold text-white tracking-wide">
+              Your <span style={{ color: accentColor }}>Ranking</span>
+            </h2>
+          </div>
+
+          {/* Rank number hero */}
+          <div className="rank-reveal-number rank-hero-card mb-5 sm:mb-6" style={{ '--accent': accentColor }}>
+            <p className="text-gray-400 text-[10px] sm:text-xs tracking-[0.3em] uppercase mb-2 font-medium">Your Rank</p>
+            <p className="rank-hero-number font-mono" style={{ color: accentColor }}>
+              #{displayRank || rank}
+            </p>
+            <div className="flex items-center gap-2 mt-2">
+              <span className="text-white/80 text-sm sm:text-base font-semibold">{entry.name || 'Anonymous'}</span>
+              <span className="text-gray-500 text-xs">·</span>
+              <span className="text-gray-400 text-xs sm:text-sm font-mono">{entry.score} pts</span>
+            </div>
+          </div>
+
+          {renderPodium(allForMode)}
+
+          {/* Scrollable list if in top 50, otherwise motivational message */}
+          {inTop50 ? (
+            <div className="lb-list-panel mb-5 sm:mb-6 rank-reveal-list">
+              <div className="max-h-[35vh] sm:max-h-[300px] overflow-y-auto rank-reveal-scroll space-y-1 p-1">
+                {top50.map((e, i) => renderLeaderboardEntry(e, i, isSurvivor, entry))}
+              </div>
+            </div>
+          ) : (
+            <div className="lb-list-panel mb-5 sm:mb-6 rank-reveal-list text-center py-6 sm:py-8">
+              <p className="text-gray-400 text-sm font-medium mb-2">Keep playing to climb the ranks!</p>
+              <p className="text-gray-500 text-xs mb-4">You need a top 50 score to appear on the board.</p>
+              <button
+                className="text-xs tracking-[0.2em] uppercase font-semibold transition-colors px-4 py-2 rounded-lg border border-white/10 hover:border-white/20 hover:bg-white/5"
+                style={{ color: accentColor }}
+                onClick={() => { setLeaderboardTab(mode); setRankRevealData(null); triggerTransition(() => setGameState('LEADERBOARD'), 'none'); }}
+              >
+                View Top 50
+              </button>
+            </div>
+          )}
+
+          <button
+            className="start-screen__btn start-screen__btn--primary w-full"
+            onClick={() => { playSound('click', isMuted); setRankRevealData(null); triggerTransition(() => setGameState('MENU'), 'menu'); }}
+          >
+            <span className="start-screen__btn-inner">
+              <span className="start-screen__btn-icon" aria-hidden="true"><Home size={18} /></span>
+              Continue
             </span>
           </button>
         </div>
@@ -496,7 +705,7 @@ export default function App() {
         {/* Left: Home + Status */}
         <div className="flex items-center gap-3 sm:gap-4 min-w-0">
           <button
-            onClick={() => { playSound('click', isMuted); if (score > 0) { pendingScoreRef.current = { score, mode: gameMode, level }; setGameState('NAME_INPUT'); } else { triggerTransition(() => setGameState('MENU'), 'menu'); } }}
+            onClick={() => { playSound('click', isMuted); if (mismatchTimeoutRef.current) { clearTimeout(mismatchTimeoutRef.current); mismatchTimeoutRef.current = null; } setIsLocked(false); if (score > 0) { pendingScoreRef.current = { score, mode: gameMode, level }; setGameState('NAME_INPUT'); } else { triggerTransition(() => setGameState('MENU'), 'menu'); } }}
             className="p-2 sm:p-2.5 text-gray-400 hover:text-white transition-colors rounded-lg hover:bg-white/[0.06] shrink-0"
             aria-label="Back to Menu"
           >
@@ -544,7 +753,7 @@ export default function App() {
           </div>
           <div className="w-px h-6 sm:h-7 bg-white/10 shrink-0" />
           <button
-            onClick={() => { playSound('click', isMuted); setShowSettings(s => !s); }}
+            onClick={() => { playSound('click', isMuted); setShowSettings(s => { if (!s) { setGpWinnersToday(getGrandPrizeWinnersToday().length); setGpDisabled(isGrandPrizeDisabled()); } return !s; }); }}
             className="p-2 sm:p-2.5 text-gray-400 hover:text-white transition-all duration-300 rounded-lg hover:bg-white/[0.06] shrink-0"
             aria-label="Settings"
             style={{ opacity: showSettings ? 1 : undefined }}
@@ -599,7 +808,7 @@ export default function App() {
                   `}
                 >
                   {/* Card Front — Metallic base face-down */}
-                  <div className="absolute inset-0 w-full h-full backface-hidden overflow-hidden transition-transform duration-300 group-hover:scale-[1.02]">
+                  <div className="absolute inset-0 w-full h-full backface-hidden card-front-face overflow-hidden">
                     {prefersReducedMotion.current ? (
                       <img src={cardMetallicBase} alt="Card back" className="absolute inset-0 w-full h-full object-cover" draggable={false} />
                     ) : (
@@ -610,6 +819,7 @@ export default function App() {
                           loop
                           muted
                           playsInline
+                          preload="metadata"
                           className="absolute inset-0 w-full h-full object-cover"
                           draggable={false}
                           onError={(e) => { e.target.style.display = 'none'; if (e.target.nextSibling) e.target.nextSibling.style.display = 'block'; }}
@@ -626,7 +836,7 @@ export default function App() {
                     />
                   </div>
                   {/* Card Back — Semiconductor gold with icon reveal */}
-                  <div className={`absolute inset-0 w-full h-full backface-hidden rotate-y-180 overflow-hidden flex items-center justify-center breeze-transition
+                  <div className={`absolute inset-0 w-full h-full backface-hidden card-back-face overflow-hidden flex items-center justify-center breeze-transition
                     ${isCelebrating && card.isMatched ? 'celebrate-glow' : card.isMatched ? 'shadow-[0_0_15px_rgba(212,162,58,0.3)]' : ''}
                   `}>
                     <img src={cardSemiconductorGold} alt="Card face" className="absolute inset-0 w-full h-full object-cover" draggable={false} />
@@ -667,7 +877,7 @@ export default function App() {
         <span className="text-[9px] sm:text-[10px] text-gray-500 font-medium tracking-widest uppercase writing-mode-vertical">
           Synced
         </span>
-        <div className="w-1 sm:w-1.5 h-32 sm:h-40 md:h-48 bg-[#1A1A1A] rounded-full overflow-hidden relative">
+        <div className="w-2 sm:w-2.5 h-48 sm:h-56 md:h-64 bg-[#1A1A1A] rounded-full overflow-hidden relative">
           <div
             className="absolute bottom-0 left-0 w-full bg-[#0689D8] rounded-full transition-all duration-700 ease-out"
             style={{ height: `${progressPercent}%` }}
@@ -719,25 +929,27 @@ export default function App() {
   };
 
   const renderGameOver = () => (
-    <div className="start-screen">
+    <div className="start-screen game-over-screen">
       <div className="start-screen__content z-10 w-full max-w-md">
-        <div className="text-center mb-4">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-red-500/10 border border-red-500/20 mb-4">
-            <Heart size={32} className="text-red-500" />
+        <div className="text-center mb-5 sm:mb-6">
+          <div className="game-over-icon-ring mb-4">
+            <Heart size={36} className="text-red-400" />
           </div>
-          <h2 className="text-2xl sm:text-3xl md:text-4xl font-light text-white tracking-wide mb-2">
-            <span className="text-red-400 font-bold">Game Over</span>
+          <h2 className="text-3xl sm:text-4xl md:text-5xl font-bold text-white tracking-wide mb-2">
+            <span className="text-red-400">Game Over</span>
           </h2>
-          <p className="text-gray-400 text-xs sm:text-sm tracking-widest uppercase">Survivor Mode — Level {level}</p>
+          <p className="text-gray-300 text-xs sm:text-sm tracking-[0.25em] uppercase font-medium">
+            {gameMode === GAME_MODES.SURVIVOR ? 'Survivor' : 'Timed'} Mode — Level {level}
+          </p>
         </div>
-        <div className="w-full bg-[#1A1A1A]/80 border border-[#2A2A2A] backdrop-blur-md rounded-2xl p-4 sm:p-6 mb-6 shadow-2xl">
-          <div className="flex justify-between items-center mb-3">
-            <span className="text-gray-400 text-xs tracking-widest uppercase">Final Score</span>
-            <span className="font-mono font-bold text-white text-lg sm:text-xl">{score}</span>
+        <div className="game-over-stats-panel mb-6 sm:mb-8">
+          <div className="flex justify-between items-center py-3 border-b border-white/[0.06]">
+            <span className="text-gray-400 text-xs sm:text-sm tracking-[0.2em] uppercase font-medium">Final Score</span>
+            <span className="font-mono font-bold text-white text-xl sm:text-2xl">{score}</span>
           </div>
-          <div className="flex justify-between items-center">
-            <span className="text-gray-400 text-xs tracking-widest uppercase">Level Reached</span>
-            <span className="font-mono font-bold text-white text-lg sm:text-xl">{level}</span>
+          <div className="flex justify-between items-center py-3">
+            <span className="text-gray-400 text-xs sm:text-sm tracking-[0.2em] uppercase font-medium">Level Reached</span>
+            <span className="font-mono font-bold text-white text-xl sm:text-2xl">{level}</span>
           </div>
         </div>
         <div className="flex flex-col gap-3 w-full max-w-xs mx-auto">
@@ -767,11 +979,21 @@ export default function App() {
   const handleNameSubmit = () => {
     const pending = pendingScoreRef.current;
     if (pending) {
-      saveScore(pending.score, pending.mode, pending.level, playerName.trim());
+      const name = playerName.trim() || 'Anonymous';
+      const newEntry = { name, score: pending.score, date: new Date().toLocaleDateString(), mode: pending.mode, level: pending.level };
+      // Calculate rank BEFORE saving so we use the current leaderboard + new entry
+      const modeEntries = [...leaderboard, newEntry].filter(e => (e.mode || GAME_MODES.TIMED) === pending.mode).sort((a, b) => b.score - a.score);
+      const rank = modeEntries.findIndex(e => e === newEntry) + 1;
+      saveScore(pending.score, pending.mode, pending.level, name);
+      setRankRevealData({ rank, entry: newEntry, mode: pending.mode });
       pendingScoreRef.current = null;
+      setPlayerName('');
+      triggerTransition(() => setGameState('RANK_REVEAL'), 'none');
+    } else {
+      // No pending score — go straight to menu
+      setPlayerName('');
+      triggerTransition(() => setGameState('MENU'), 'menu');
     }
-    setPlayerName('');
-    triggerTransition(() => setGameState('MENU'), 'menu');
   };
 
   const renderNameInput = () => {
@@ -882,6 +1104,7 @@ export default function App() {
   };
 
   const handleReturnToDashboard = () => {
+    if (mismatchTimeoutRef.current) { clearTimeout(mismatchTimeoutRef.current); mismatchTimeoutRef.current = null; }
     if (score > 0) {
       pendingScoreRef.current = { score, mode: gameMode, level };
     }
@@ -905,6 +1128,19 @@ export default function App() {
     }, 1800);
   };
 
+  const handleGrandPrize = () => {
+    // Record the winner and show the congratulations screen
+    addGrandPrizeWinner(playerName || 'Winner');
+    bgRef.current?.celebrate?.();
+    setGameState('GRAND_PRIZE');
+  };
+
+  const handleGrandPrizeContinue = () => {
+    // After grand prize screen, go to name input to save score
+    pendingScoreRef.current = { score, mode: gameMode, level };
+    triggerTransition(() => setGameState('NAME_INPUT'), 'menu');
+  };
+
   return (
     <div className="min-h-screen min-h-[100dvh] bg-[#05060a] flex flex-col items-center justify-center relative overflow-hidden">
       <SpaceBackground ref={bgRef} />
@@ -912,7 +1148,7 @@ export default function App() {
         {/* Settings gear — shown on menu/leaderboard screens (in-game settings is in the HUD) */}
         {(gameState === 'MENU' || gameState === 'LEADERBOARD') && (
           <button
-            onClick={() => { playSound('click', isMuted); setShowSettings(s => !s); }}
+            onClick={() => { playSound('click', isMuted); setShowSettings(s => { if (!s) { setGpWinnersToday(getGrandPrizeWinnersToday().length); setGpDisabled(isGrandPrizeDisabled()); } return !s; }); }}
             className="fixed top-3 right-3 sm:top-4 sm:right-4 md:right-6 z-40 p-2 text-gray-400 hover:text-white transition-all duration-300 rounded-lg hover:bg-white/[0.06]"
             aria-label="Settings"
             style={{ opacity: showSettings ? 1 : undefined }}
@@ -991,13 +1227,53 @@ export default function App() {
                   disabled={isMuted}
                 />
               </div>
+
+              {/* Grand Prize divider */}
+              <div className="border-t border-white/[0.06] pt-3 mt-1">
+                <span className="text-[10px] sm:text-[11px] text-gray-400 tracking-[0.2em] uppercase font-semibold">Grand Prize</span>
+              </div>
+
+              {/* Grand Prize toggle */}
+              <button
+                onClick={() => {
+                  const next = !gpDisabled;
+                  setGrandPrizeDisabled(next);
+                  setGpDisabled(next);
+                  playSound('click', isMuted);
+                }}
+                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border transition-all duration-200 ${gpDisabled
+                    ? 'bg-red-500/10 border-red-500/20 text-red-400'
+                    : 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
+                  }`}
+              >
+                <Trophy size={15} />
+                <span className="text-xs font-medium tracking-wide">{gpDisabled ? 'Disabled' : 'Enabled'}</span>
+              </button>
+
+              {/* Daily winners count + reset */}
+              <div className="flex items-center justify-between">
+                <div className="flex flex-col">
+                  <span className="text-[10px] text-gray-400 tracking-wider uppercase font-medium">Today's Winners</span>
+                  <span className="text-xs text-white font-mono mt-0.5">{gpWinnersToday} / {GRAND_PRIZE_DAILY_MAX}</span>
+                </div>
+                <button
+                  onClick={() => {
+                    resetGrandPrizeToday();
+                    setGpWinnersToday(0);
+                    playSound('click', isMuted);
+                  }}
+                  className="text-[10px] tracking-wider uppercase font-semibold text-yellow-400 hover:text-yellow-300 px-3 py-1.5 rounded-lg border border-yellow-400/20 hover:border-yellow-400/40 hover:bg-yellow-400/5 transition-all"
+                >
+                  Reset
+                </button>
+              </div>
             </div>
           </div>
         )}
         {gameState === 'SPLASH' && renderSplash()}
         {gameState === 'MENU' && renderMenu()}
         {gameState === 'LEADERBOARD' && renderLeaderboard()}
-        {gameState !== 'MENU' && gameState !== 'LEADERBOARD' && gameState !== 'SPLASH' && gameState !== 'NAME_INPUT' && (
+        {gameState !== 'MENU' && gameState !== 'LEADERBOARD' && gameState !== 'SPLASH' && gameState !== 'NAME_INPUT' && gameState !== 'RANK_REVEAL' && gameState !== 'GRAND_PRIZE' && (
           <>
             {renderSyncBar()}
             {renderHealthBar()}
@@ -1015,6 +1291,7 @@ export default function App() {
         )}
         {gameState === 'GAME_OVER' && renderGameOver()}
         {gameState === 'NAME_INPUT' && renderNameInput()}
+        {gameState === 'RANK_REVEAL' && renderRankReveal()}
         {gameState === 'LEVEL_COMPLETE' && (
           <LevelCompleteScreen
             level={level}
@@ -1024,6 +1301,14 @@ export default function App() {
             isMuted={isMuted}
             onAdvance={handleAdvanceLevel}
             onReturn={handleReturnToDashboard}
+            onGrandPrize={handleGrandPrize}
+          />
+        )}
+        {gameState === 'GRAND_PRIZE' && (
+          <GrandPrizeScreen
+            score={score}
+            isMuted={isMuted}
+            onContinue={handleGrandPrizeContinue}
           />
         )}
       </div>
