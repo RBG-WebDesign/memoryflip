@@ -1,10 +1,10 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { Trophy, Play, Volume2, VolumeX, Home, Settings, X, Music, Zap, Target, Eye, Shuffle, Lock, Shield, Trash2, RotateCcw } from 'lucide-react';
+import { Trophy, Play, Volume2, VolumeX, Home, Settings, X, Music, Zap, Target, Eye, Shuffle, Lock, Shield, Trash2, RotateCcw, Maximize, Minimize } from 'lucide-react';
 import SpaceBackground from './components/background/SpaceBackground';
 import RoundCompleteScreen from './components/LevelCompleteScreen';
 import { ALL_ICONS, SAMSUNG_PRODUCTS, DECOY_ICONS, ROUND_CONFIG, PRIZE_TIERS, addGrandPrizeWinner, resetGrandPrizeToday, isGrandPrizeDisabled, setGrandPrizeDisabled, getGrandPrizeWinnersToday, GRAND_PRIZE_DAILY_MAX, getSwapCount } from './constants/config';
 import GrandPrizeScreen from './components/GrandPrizeScreen';
-import { playSound, initAudio, startMusic, stopMusic, setMusicVolume, setSfxVolume } from './utils/audio';
+import { playSound, initAudio, startMusic, stopMusic, setMusicVolume, setSfxVolume, speakGo } from './utils/audio';
 import { shuffleArray } from './utils/helpers';
 import { fetchLeaderboard, addLeaderboardEntry, clearLeaderboard, fetchGrandPrizeToday, addGrandPrizeWinnerRemote, resetGrandPrizeTodayRemote } from './utils/api';
 import samsungLogo from './assets/logo/Samsung_Orig_Wordmark_WHITE_RGB.png';
@@ -75,7 +75,8 @@ export default function App() {
   });
   const [isMuted, setIsMuted] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  const [musicVol, setMusicVol] = useState(0.75);
+  const [musicVol, setMusicVol] = useState(0.5);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const [sfxVol, setSfxVol] = useState(0.7);
   const [audioReady, setAudioReady] = useState(false);
   const [playerName, setPlayerName] = useState('');
@@ -111,9 +112,34 @@ export default function App() {
   const prefersReducedMotion = useRef(
     typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
   );
+  const supportsWebM = useRef((() => {
+    if (typeof document === 'undefined') return false;
+    const v = document.createElement('video');
+    return v.canPlayType && v.canPlayType('video/webm; codecs="vp8, vorbis"') !== '';
+  })());
 
   useEffect(() => { scoreRef.current = score; }, [score]);
   useEffect(() => { roundRef.current = round; }, [round]);
+
+  // ─── Fullscreen sync ───
+  useEffect(() => {
+    const onChange = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener('fullscreenchange', onChange);
+    document.addEventListener('webkitfullscreenchange', onChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', onChange);
+      document.removeEventListener('webkitfullscreenchange', onChange);
+    };
+  }, []);
+
+  const toggleFullscreen = useCallback(() => {
+    if (!document.fullscreenElement && !document.webkitFullscreenElement) {
+      const el = document.documentElement;
+      (el.requestFullscreen || el.webkitRequestFullscreen).call(el);
+    } else {
+      (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+    }
+  }, []);
 
   // ─── Asset Preloader ───
   useEffect(() => {
@@ -341,6 +367,7 @@ export default function App() {
       // All swaps done, move to selection
       setIsLocked(false);
       setGameState('SELECTION');
+      speakGo(isMuted);
       return;
     }
 
@@ -723,38 +750,50 @@ export default function App() {
         </div>
         <div className="start-screen__title-section">
           <h1 className="start-screen__title start-screen__title--logo">
-            <video
-              ref={(el) => {
-                if (!el) return;
-                el.play().catch(() => {});
-                el.onended = () => {
-                  el.style.display = 'none';
-                  const loop = el.parentElement.querySelector('.logo-video-loop');
-                  if (loop) {
-                    loop.style.display = '';
-                    loop.play().catch(() => {});
-                  }
-                };
-              }}
-              src={memoryFlipIntro}
-              poster={memoryFlipLogo}
-              width={800}
-              height={360}
-              className="logo-video"
-              muted
-              playsInline
-            />
-            <video
-              src={memoryFlipLoop}
-              width={800}
-              height={360}
-              className="logo-video logo-video-loop"
-              style={{ display: 'none' }}
-              muted
-              playsInline
-              loop
-              preload="auto"
-            />
+            {supportsWebM.current ? (
+              <>
+                <video
+                  ref={(el) => {
+                    if (!el) return;
+                    el.play().catch(() => {});
+                    el.onended = () => {
+                      el.style.display = 'none';
+                      const loop = el.parentElement.querySelector('.logo-video-loop');
+                      if (loop) {
+                        loop.style.display = '';
+                        loop.play().catch(() => {});
+                      }
+                    };
+                  }}
+                  src={memoryFlipIntro}
+                  poster={memoryFlipLogo}
+                  width={800}
+                  height={360}
+                  className="logo-video"
+                  muted
+                  playsInline
+                />
+                <video
+                  src={memoryFlipLoop}
+                  width={800}
+                  height={360}
+                  className="logo-video logo-video-loop"
+                  style={{ display: 'none' }}
+                  muted
+                  playsInline
+                  loop
+                  preload="auto"
+                />
+              </>
+            ) : (
+              <img
+                src={memoryFlipLogo}
+                alt="Memory Flip"
+                width={800}
+                height={360}
+                className="logo-video"
+              />
+            )}
           </h1>
           <p className="start-screen__subtitle">
             Keep your eyes on the card.
@@ -1135,7 +1174,7 @@ export default function App() {
                 >
                   {/* Card Front — Metallic Samsung logo (face-down) */}
                   <div className="absolute inset-0 w-full h-full backface-hidden card-front-face overflow-hidden">
-                    {prefersReducedMotion.current ? (
+                    {prefersReducedMotion.current || !supportsWebM.current ? (
                       <img src={cardMetallicBase} alt="Card back" className="absolute inset-0 w-full h-full object-cover" draggable={false} />
                     ) : (
                       <>
@@ -1489,6 +1528,19 @@ export default function App() {
               onChange={(e) => { const v = parseInt(e.target.value) / 100; setSfxVol(v); setSfxVolume(v); }}
               className="settings-slider w-full" disabled={isMuted} />
           </div>
+          <div className="border-t border-white/[0.06] pt-3 mt-1">
+            <span className="text-[10px] sm:text-[11px] text-gray-400 tracking-[0.2em] uppercase font-semibold">Display</span>
+          </div>
+          <button
+            onClick={() => { toggleFullscreen(); playSound('click', isMuted); }}
+            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border transition-all duration-200 ${isFullscreen
+              ? 'bg-sky-500/10 border-sky-500/20 text-sky-400'
+              : 'bg-white/[0.03] border-white/[0.06] text-gray-300 hover:bg-white/[0.06]'
+            }`}
+          >
+            {isFullscreen ? <Minimize size={15} /> : <Maximize size={15} />}
+            <span className="text-xs font-medium tracking-wide">{isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}</span>
+          </button>
           <div className="border-t border-white/[0.06] pt-3 mt-1">
             <span className="text-[10px] sm:text-[11px] text-gray-400 tracking-[0.2em] uppercase font-semibold">Grand Prize</span>
           </div>

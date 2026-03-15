@@ -60,8 +60,7 @@ body {
   -webkit-transform: translate3d(0, 0, 1px);
   transform: translate3d(0, 0, 1px);
 }
-.card-front-face > video,
-.card-front-face > img:not([alt="Samsung"]) {
+.card-front-face > video {
   filter: brightness(0.12);
 }
 /* Push back face slightly behind to prevent z-fighting in Safari */
@@ -1041,17 +1040,28 @@ body {
   --hud-h: 4.5rem;
   --grid-gap: 0.5rem;
   --pad-y: 1.5rem;
+  --pad-x: 1rem;
+  --card-scale: 0.75;
   --rows: 4;
   --cols: 3;
   --max-card-h: 18vh;
+
+  /* Height-based card size */
   --avail-h: calc(100dvh - var(--hud-h) - var(--pad-y) * 2);
   --fit-h: calc((var(--avail-h) - (var(--rows) - 1) * var(--grid-gap)) / var(--rows));
-  --card-h: min(var(--fit-h), var(--max-card-h));
+
+  /* Width-based card size: ensure grid fits within viewport */
+  --avail-w: calc(100vw - var(--pad-x) * 2);
+  --fit-w: calc((var(--avail-w) - (var(--cols) - 1) * var(--grid-gap)) / var(--cols));
+  --fit-h-from-w: calc(var(--fit-w) * 7 / 5);
+
+  /* Take the smallest of height-fit, width-fit, and max — then apply scale */
+  --card-h: calc(min(var(--fit-h), var(--fit-h-from-w), var(--max-card-h)) * var(--card-scale));
   --card-w: calc(var(--card-h) * 5 / 7);
   --grid-w: calc(var(--cols) * var(--card-w) + (var(--cols) - 1) * var(--grid-gap));
 
   width: 100%;
-  max-width: min(92vw, var(--grid-w));
+  max-width: min(var(--avail-w), var(--grid-w));
   margin: 0 auto;
 }
 
@@ -1062,12 +1072,12 @@ body {
 }
 
 /* Memory Flip grid sizes (rows × cols) */
-.game-grid-wrapper[data-grid="2x3"] { --rows: 2; --cols: 3; --max-card-h: 22vh; }
-.game-grid-wrapper[data-grid="3x3"] { --rows: 3; --cols: 3; --max-card-h: 18vh; }
-.game-grid-wrapper[data-grid="3x4"] { --rows: 3; --cols: 4; --max-card-h: 18vh; }
-.game-grid-wrapper[data-grid="4x4"] { --rows: 4; --cols: 4; --max-card-h: 15vh; }
-.game-grid-wrapper[data-grid="4x5"] { --rows: 4; --cols: 5; --max-card-h: 14vh; }
-.game-grid-wrapper[data-grid="5x5"] { --rows: 5; --cols: 5; --max-card-h: 12vh; }
+.game-grid-wrapper[data-grid="2x3"] { --rows: 2; --cols: 3; --max-card-h: 22dvh; }
+.game-grid-wrapper[data-grid="3x3"] { --rows: 3; --cols: 3; --max-card-h: 18dvh; }
+.game-grid-wrapper[data-grid="3x4"] { --rows: 3; --cols: 4; --max-card-h: 18dvh; }
+.game-grid-wrapper[data-grid="4x4"] { --rows: 4; --cols: 4; --max-card-h: 15dvh; }
+.game-grid-wrapper[data-grid="4x5"] { --rows: 4; --cols: 5; --max-card-h: 14dvh; }
+.game-grid-wrapper[data-grid="5x5"] { --rows: 5; --cols: 5; --max-card-h: 12dvh; }
 
 /* ─── Shuffle swap animation: prevent clipping during card slides ─── */
 .game-grid-wrapper .grid {
@@ -1089,6 +1099,7 @@ body {
     --hud-h: 5rem;
     --grid-gap: 0.75rem;
     --pad-y: 2rem;
+    --card-scale: 1;
   }
 }
 

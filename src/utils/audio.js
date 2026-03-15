@@ -19,7 +19,7 @@ export const initAudio = () => {
     masterGain.connect(audioCtx.destination);
 
     musicGain = audioCtx.createGain();
-    musicGain.gain.value = 0.75;
+    musicGain.gain.value = 0.5;
     musicGain.connect(masterGain);
 
     sfxGain = audioCtx.createGain();
@@ -723,5 +723,102 @@ export const playSound = (type, isMuted) => {
       createOsc('sine', 440, t + 0.06, 0.08, 0.04, sfxGain);
       break;
     }
+  }
+};
+
+// --- Speech: "GO!" voice announcement ---
+// Uses SpeechSynthesis routed through Web Audio API for reverb + volume boost
+let goVoiceReady = false;
+let preferredVoice = null;
+
+// Pre-select a female voice once voices load
+const pickFemaleVoice = () => {
+  if (typeof window === 'undefined' || !window.speechSynthesis) return;
+  const voices = window.speechSynthesis.getVoices();
+  // Prefer female English voices — common names across platforms
+  const femaleKeywords = ['female', 'samantha', 'karen', 'victoria', 'zira', 'susan', 'hazel', 'fiona', 'moira', 'tessa', 'allison', 'ava', 'joana', 'nicky', 'sandy'];
+  const englishVoices = voices.filter(v => v.lang.startsWith('en'));
+  preferredVoice = englishVoices.find(v =>
+    femaleKeywords.some(k => v.name.toLowerCase().includes(k))
+  ) || englishVoices.find(v =>
+    // Many default female voices don't have 'female' in the name
+    // Higher-index English voices tend to be female on many platforms
+    !v.name.toLowerCase().includes('male') && !v.name.toLowerCase().includes('david') && !v.name.toLowerCase().includes('james') && !v.name.toLowerCase().includes('daniel') && !v.name.toLowerCase().includes('alex') && !v.name.toLowerCase().includes('tom') && !v.name.toLowerCase().includes('mark')
+  ) || englishVoices[0] || voices[0] || null;
+  goVoiceReady = true;
+};
+
+if (typeof window !== 'undefined' && window.speechSynthesis) {
+  window.speechSynthesis.onvoiceschanged = pickFemaleVoice;
+  pickFemaleVoice(); // try immediately (some browsers have voices ready)
+}
+
+// Create a convolution reverb impulse response
+const createReverbImpulse = (ctx, duration = 0.6, decay = 2.5) => {
+  const length = ctx.sampleRate * duration;
+  const impulse = ctx.createBuffer(2, length, ctx.sampleRate);
+  for (let ch = 0; ch < 2; ch++) {
+    const data = impulse.getChannelData(ch);
+    for (let i = 0; i < length; i++) {
+      data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / length, decay);
+    }
+  }
+  return impulse;
+};
+
+export const speakGo = (isMuted) => {
+  if (isMuted) return;
+  if (typeof window === 'undefined' || !window.speechSynthesis) return;
+
+  if (!goVoiceReady) pickFemaleVoice();
+
+  // Duck the music so the voice cuts through
+  if (musicGain && audioCtx) {
+    const prevVol = musicGain.gain.value;
+    musicGain.gain.setValueAtTime(prevVol, audioCtx.currentTime);
+    musicGain.gain.linearRampToValueAtTime(prevVol * 0.1, audioCtx.currentTime + 0.05);
+    musicGain.gain.linearRampToValueAtTime(prevVol, audioCtx.currentTime + 1.5);
+  }
+
+  // Speak "GO!" with female voice at max volume
+  const utterance = new SpeechSynthesisUtterance('GO!');
+  utterance.rate = 0.85;
+  utterance.pitch = 1.4;
+  utterance.volume = 1.0;
+  if (preferredVoice) utterance.voice = preferredVoice;
+  window.speechSynthesis.speak(utterance);
+
+  // Layer a reverb'd synth tone for impact
+  if (audioCtx) {
+    const t = audioCtx.currentTime;
+    const convolver = audioCtx.createConvolver();
+    convolver.buffer = createReverbImpulse(audioCtx, 1.0, 2.0);
+
+    const reverbGain = audioCtx.createGain();
+    reverbGain.gain.value = 0.25;
+    convolver.connect(reverbGain);
+    reverbGain.connect(masterGain);
+
+    // Bright impact tone with reverb tail
+    const freqs = [1047, 1319, 1568]; // C6, E6, G6 chord
+    freqs.forEach(f => {
+      const osc = audioCtx.createOscillator();
+      const g = audioCtx.createGain();
+      osc.type = 'square';
+      osc.frequency.value = f;
+      g.gain.setValueAtTime(0.12, t);
+      g.gain.exponentialRampToValueAtTime(0.001, t + 0.5);
+      osc.connect(g);
+      g.connect(sfxGain);
+      g.connect(convolver);
+      osc.start(t);
+      osc.stop(t + 0.5);
+    });
+
+    // Clean up convolver after reverb tail fades
+    setTimeout(() => {
+      convolver.disconnect();
+      reverbGain.disconnect();
+    }, 2500);
   }
 };
