@@ -1,10 +1,13 @@
 // ─── Cloud API client ───
-// Talks to Netlify Functions backed by Neon Postgres.
-// Always saves locally AND to cloud. Merges both on load.
-// Queues failed cloud writes for retry on next app load.
+// Dual-write: local first (fast, reliable), then remote (async, can fail).
+// Failed remote writes get queued and retried on startup + every 30s.
+// On load: remote is source of truth when reachable, local is fallback.
 
 const API_TIMEOUT = 8000;
-const PENDING_KEY = 'galaxy-sync-pending-uploads';
+const SYNC_QUEUE_KEY = 'galaxy-sync-queue';
+const LEADERBOARD_KEY = 'galaxy-sync-leaderboard';
+
+// ─── Core fetch wrapper ───
 
 async function apiFetch(path, opts = {}) {
   const controller = new AbortController();
@@ -21,90 +24,107 @@ async function apiFetch(path, opts = {}) {
   }
 }
 
-// ─── Pending upload queue (for offline resilience) ───
+// ─── Sync Queue (offline resilience) ───
 
-function getPendingUploads() {
+function getSyncQueue() {
   try {
-    return JSON.parse(localStorage.getItem(PENDING_KEY) || '[]');
+    return JSON.parse(localStorage.getItem(SYNC_QUEUE_KEY) || '[]');
   } catch { return []; }
 }
 
-function addPendingUpload(entry) {
+function addToSyncQueue(entry) {
   try {
-    const pending = getPendingUploads();
-    pending.push(entry);
-    localStorage.setItem(PENDING_KEY, JSON.stringify(pending));
+    const queue = getSyncQueue();
+    queue.push({ ...entry, attemptedAt: Date.now() });
+    localStorage.setItem(SYNC_QUEUE_KEY, JSON.stringify(queue));
   } catch { /* ignore */ }
 }
 
-function clearPendingUploads() {
-  try {
-    localStorage.removeItem(PENDING_KEY);
-  } catch { /* ignore */ }
-}
+export async function flushSyncQueue() {
+  const queue = getSyncQueue();
+  if (queue.length === 0) return;
 
-// Flush any queued entries to Neon (called on app load when online)
-export async function flushPendingUploads() {
-  const pending = getPendingUploads();
-  if (pending.length === 0) return;
-
-  const stillPending = [];
-  for (const entry of pending) {
+  const failed = [];
+  for (const item of queue) {
     try {
       await apiFetch('/api/leaderboard/add', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: entry.name, score: entry.score, round: entry.round }),
+        body: JSON.stringify({ name: item.name, score: item.score, round: item.round }),
       });
     } catch {
-      stillPending.push(entry);
+      failed.push(item);
     }
   }
 
-  if (stillPending.length > 0) {
-    localStorage.setItem(PENDING_KEY, JSON.stringify(stillPending));
-  } else {
-    clearPendingUploads();
+  localStorage.setItem(SYNC_QUEUE_KEY, JSON.stringify(failed));
+}
+
+// Start periodic flush (every 30s) — call once on app mount
+let flushInterval = null;
+export function startPeriodicSync() {
+  if (flushInterval) return;
+  flushSyncQueue().catch(() => {});
+  flushInterval = setInterval(() => flushSyncQueue().catch(() => {}), 30000);
+}
+
+export function stopPeriodicSync() {
+  if (flushInterval) {
+    clearInterval(flushInterval);
+    flushInterval = null;
   }
 }
 
 // ─── Leaderboard ───
 
 export async function fetchLeaderboard() {
-  // Always read local scores first
+  // Read local first (always available)
   let local = [];
   try {
-    local = JSON.parse(localStorage.getItem('galaxy-sync-leaderboard') || '[]');
+    local = JSON.parse(localStorage.getItem(LEADERBOARD_KEY) || '[]');
   } catch { /* empty */ }
 
-  // Try cloud
-  let cloud = [];
+  // Try remote — if reachable, it's the source of truth
   try {
     const rows = await apiFetch('/api/leaderboard');
-    cloud = rows.map((r) => ({
+    const cloud = rows.map((r) => ({
       name: r.name,
       score: r.score,
       round: r.round,
       date: new Date(r.created_at).toLocaleDateString(),
     }));
-  } catch { /* cloud unavailable, local is the fallback */ }
 
-  // Merge: dedupe by name+score+round to avoid duplicates
-  const seen = new Set();
-  const merged = [];
-  for (const entry of [...cloud, ...local]) {
-    const key = `${entry.name}|${entry.score}|${entry.round}`;
-    if (!seen.has(key)) {
-      seen.add(key);
-      merged.push(entry);
+    // Merge cloud + local, dedupe (cloud entries take priority)
+    const seen = new Set();
+    const merged = [];
+    for (const entry of [...cloud, ...local]) {
+      const key = `${entry.name}|${entry.score}|${entry.round}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        merged.push(entry);
+      }
     }
-  }
+    const sorted = merged.sort((a, b) => b.score - a.score);
 
-  return merged.sort((a, b) => b.score - a.score);
+    // Update local to match merged result
+    localStorage.setItem(LEADERBOARD_KEY, JSON.stringify(sorted));
+    return sorted;
+  } catch {
+    // Neon unreachable — fall through to local
+    return local.sort((a, b) => b.score - a.score);
+  }
 }
 
 export async function addLeaderboardEntry(name, score, round) {
-  // Always try cloud first
+  // Local write first (fast, never blocks the user)
+  try {
+    const local = JSON.parse(localStorage.getItem(LEADERBOARD_KEY) || '[]');
+    local.push({ name, score, round, date: new Date().toLocaleDateString() });
+    local.sort((a, b) => b.score - a.score);
+    localStorage.setItem(LEADERBOARD_KEY, JSON.stringify(local.slice(0, 500)));
+  } catch { /* ignore */ }
+
+  // Remote write second (async, can fail gracefully)
   try {
     await apiFetch('/api/leaderboard/add', {
       method: 'POST',
@@ -113,18 +133,22 @@ export async function addLeaderboardEntry(name, score, round) {
     });
     return true;
   } catch {
-    // Cloud failed — queue for retry on next load
-    addPendingUpload({ name, score, round });
+    // Cloud failed — queue for retry
+    addToSyncQueue({ name, score, round });
     return false;
   }
 }
 
 export async function clearLeaderboard(pin) {
-  return apiFetch('/api/leaderboard/clear', {
+  const result = await apiFetch('/api/leaderboard/clear', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ pin }),
   });
+  // Also clear local + sync queue
+  localStorage.removeItem(LEADERBOARD_KEY);
+  localStorage.removeItem(SYNC_QUEUE_KEY);
+  return result;
 }
 
 // ─── Grand Prize ───
@@ -133,7 +157,6 @@ export async function fetchGrandPrizeToday() {
   try {
     return await apiFetch('/api/grandprize');
   } catch {
-    // Fallback: localStorage
     try {
       const data = JSON.parse(localStorage.getItem('galaxy-sync-grand-prize-winners') || '{}');
       const today = new Date().toISOString().slice(0, 10);
