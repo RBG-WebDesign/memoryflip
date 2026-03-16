@@ -6,7 +6,7 @@ import { ALL_ICONS, SAMSUNG_PRODUCTS, DECOY_ICONS, ROUND_CONFIG, PRIZE_TIERS, ad
 import GrandPrizeScreen from './components/GrandPrizeScreen';
 import { playSound, initAudio, startMusic, stopMusic, setMusicVolume, setSfxVolume, speakGo, distortAndStopMusic, startDrone, stopDrone, playGameOverJingle } from './utils/audio';
 import { shuffleArray } from './utils/helpers';
-import { fetchLeaderboard, addLeaderboardEntry, clearLeaderboard, fetchGrandPrizeToday, addGrandPrizeWinnerRemote, resetGrandPrizeTodayRemote, startPeriodicSync, stopPeriodicSync } from './utils/api';
+import { fetchLeaderboard, addLeaderboardEntry, clearLeaderboard, fetchGrandPrizeToday, addGrandPrizeWinnerRemote, resetGrandPrizeTodayRemote, startPeriodicSync, stopPeriodicSync, getPendingSyncCount } from './utils/api';
 import samsungLogo from './assets/logo/Samsung_Orig_Wordmark_WHITE_RGB.png';
 import memoryFlipLogo from './assets/logo/memory-flip-logo.png';
 import memoryFlipIntro from './assets/logo/memory-flip-intro.webm';
@@ -1743,6 +1743,16 @@ export default function App() {
                 <Shield size={28} className="text-emerald-400" />
               </div>
               <h3 className="text-white text-lg sm:text-xl font-semibold tracking-wide">Admin Panel</h3>
+              {/* Sync status indicator */}
+              {(() => {
+                const pending = getPendingSyncCount();
+                return (
+                  <div className={`flex items-center gap-2 text-[11px] sm:text-xs tracking-wider uppercase ${pending > 0 ? 'text-amber-400' : 'text-emerald-400/60'}`}>
+                    <span className={`w-2 h-2 rounded-full ${pending > 0 ? 'bg-amber-400 animate-pulse' : 'bg-emerald-400'}`} />
+                    {pending > 0 ? `${pending} score${pending > 1 ? 's' : ''} pending sync` : 'All synced to cloud'}
+                  </div>
+                );
+              })()}
             </div>
 
             {/* Status message */}

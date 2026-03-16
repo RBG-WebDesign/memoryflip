@@ -32,6 +32,10 @@ function getSyncQueue() {
   } catch { return []; }
 }
 
+export function getPendingSyncCount() {
+  return getSyncQueue().length;
+}
+
 function addToSyncQueue(entry) {
   try {
     const queue = getSyncQueue();
