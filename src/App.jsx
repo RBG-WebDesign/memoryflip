@@ -67,25 +67,11 @@ export default function App() {
   const [revealCountdown, setRevealCountdown] = useState(null);
 
   // ─── UI State ───
-  // ── TEST DATA (remove before production) ──
-  const TEST_LEADERBOARD = [
-    { name: 'AUSTIN', score: 4200, date: '3/16/2026', round: 8 },
-    { name: 'JENNY', score: 3850, date: '3/15/2026', round: 8 },
-    { name: 'MARCUS', score: 3400, date: '3/15/2026', round: 8 },
-    { name: 'SOPHIA', score: 2900, date: '3/14/2026', round: 7 },
-    { name: 'DAVID K', score: 2650, date: '3/14/2026', round: 7 },
-    { name: 'EMILY', score: 2100, date: '3/13/2026', round: 6 },
-    { name: 'CHRIS P', score: 1800, date: '3/13/2026', round: 5 },
-    { name: 'SARAH M', score: 1450, date: '3/12/2026', round: 5 },
-    { name: 'JAMES', score: 1050, date: '3/12/2026', round: 4 },
-    { name: 'OLIVIA', score: 800, date: '3/11/2026', round: 3 },
-  ];
   const [leaderboard, setLeaderboard] = useState(() => {
     try {
       const saved = localStorage.getItem('galaxy-sync-leaderboard');
-      const parsed = saved ? JSON.parse(saved) : [];
-      return [...parsed, ...TEST_LEADERBOARD].sort((a, b) => b.score - a.score);
-    } catch { return TEST_LEADERBOARD; }
+      return saved ? JSON.parse(saved).sort((a, b) => b.score - a.score) : [];
+    } catch { return []; }
   });
   const [isMuted, setIsMuted] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -218,7 +204,7 @@ export default function App() {
     (async () => {
       try {
         const cloud = await fetchLeaderboard();
-        if (!cancelled && cloud.length > 0) setLeaderboard(prev => [...cloud, ...TEST_LEADERBOARD].sort((a, b) => b.score - a.score));
+        if (!cancelled && cloud.length > 0) setLeaderboard(cloud.sort((a, b) => b.score - a.score));
       } catch { /* fallback is already in localStorage init */ }
       try {
         const gp = await fetchGrandPrizeToday();
