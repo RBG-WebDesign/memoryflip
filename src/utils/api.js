@@ -1,8 +1,10 @@
 // ─── Cloud API client ───
 // Talks to Netlify Functions backed by Neon Postgres.
-// Falls back to localStorage when the API is unreachable (local dev, offline).
+// Always saves locally AND to cloud. Merges both on load.
+// Queues failed cloud writes for retry on next app load.
 
 const API_TIMEOUT = 8000;
+const PENDING_KEY = 'galaxy-sync-pending-uploads';
 
 async function apiFetch(path, opts = {}) {
   const controller = new AbortController();
@@ -19,26 +21,90 @@ async function apiFetch(path, opts = {}) {
   }
 }
 
+// ─── Pending upload queue (for offline resilience) ───
+
+function getPendingUploads() {
+  try {
+    return JSON.parse(localStorage.getItem(PENDING_KEY) || '[]');
+  } catch { return []; }
+}
+
+function addPendingUpload(entry) {
+  try {
+    const pending = getPendingUploads();
+    pending.push(entry);
+    localStorage.setItem(PENDING_KEY, JSON.stringify(pending));
+  } catch { /* ignore */ }
+}
+
+function clearPendingUploads() {
+  try {
+    localStorage.removeItem(PENDING_KEY);
+  } catch { /* ignore */ }
+}
+
+// Flush any queued entries to Neon (called on app load when online)
+export async function flushPendingUploads() {
+  const pending = getPendingUploads();
+  if (pending.length === 0) return;
+
+  const stillPending = [];
+  for (const entry of pending) {
+    try {
+      await apiFetch('/api/leaderboard/add', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: entry.name, score: entry.score, round: entry.round }),
+      });
+    } catch {
+      stillPending.push(entry);
+    }
+  }
+
+  if (stillPending.length > 0) {
+    localStorage.setItem(PENDING_KEY, JSON.stringify(stillPending));
+  } else {
+    clearPendingUploads();
+  }
+}
+
 // ─── Leaderboard ───
 
 export async function fetchLeaderboard() {
+  // Always read local scores first
+  let local = [];
+  try {
+    local = JSON.parse(localStorage.getItem('galaxy-sync-leaderboard') || '[]');
+  } catch { /* empty */ }
+
+  // Try cloud
+  let cloud = [];
   try {
     const rows = await apiFetch('/api/leaderboard');
-    return rows.map((r) => ({
+    cloud = rows.map((r) => ({
       name: r.name,
       score: r.score,
       round: r.round,
       date: new Date(r.created_at).toLocaleDateString(),
     }));
-  } catch {
-    // Fallback: read from localStorage
-    try {
-      return JSON.parse(localStorage.getItem('galaxy-sync-leaderboard') || '[]');
-    } catch { return []; }
+  } catch { /* cloud unavailable, local is the fallback */ }
+
+  // Merge: dedupe by name+score+round to avoid duplicates
+  const seen = new Set();
+  const merged = [];
+  for (const entry of [...cloud, ...local]) {
+    const key = `${entry.name}|${entry.score}|${entry.round}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      merged.push(entry);
+    }
   }
+
+  return merged.sort((a, b) => b.score - a.score);
 }
 
 export async function addLeaderboardEntry(name, score, round) {
+  // Always try cloud first
   try {
     await apiFetch('/api/leaderboard/add', {
       method: 'POST',
@@ -47,7 +113,8 @@ export async function addLeaderboardEntry(name, score, round) {
     });
     return true;
   } catch {
-    // Fallback: save locally
+    // Cloud failed — queue for retry on next load
+    addPendingUpload({ name, score, round });
     return false;
   }
 }

@@ -6,7 +6,7 @@ import { ALL_ICONS, SAMSUNG_PRODUCTS, DECOY_ICONS, ROUND_CONFIG, PRIZE_TIERS, ad
 import GrandPrizeScreen from './components/GrandPrizeScreen';
 import { playSound, initAudio, startMusic, stopMusic, setMusicVolume, setSfxVolume, speakGo, distortAndStopMusic, startDrone, stopDrone, playGameOverJingle } from './utils/audio';
 import { shuffleArray } from './utils/helpers';
-import { fetchLeaderboard, addLeaderboardEntry, clearLeaderboard, fetchGrandPrizeToday, addGrandPrizeWinnerRemote, resetGrandPrizeTodayRemote } from './utils/api';
+import { fetchLeaderboard, addLeaderboardEntry, clearLeaderboard, fetchGrandPrizeToday, addGrandPrizeWinnerRemote, resetGrandPrizeTodayRemote, flushPendingUploads } from './utils/api';
 import samsungLogo from './assets/logo/Samsung_Orig_Wordmark_WHITE_RGB.png';
 import memoryFlipLogo from './assets/logo/memory-flip-logo.png';
 import memoryFlipIntro from './assets/logo/memory-flip-intro.webm';
@@ -199,12 +199,15 @@ export default function App() {
   const MAX_LEADERBOARD_ENTRIES = 500;
 
   // ─── Fetch leaderboard + grand prize from cloud on mount ───
+  // Merges cloud + local, dedupes, and flushes any offline-queued scores to Neon
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      // Flush any scores that failed to upload last session
+      await flushPendingUploads().catch(() => {});
       try {
-        const cloud = await fetchLeaderboard();
-        if (!cancelled && cloud.length > 0) setLeaderboard(cloud.sort((a, b) => b.score - a.score));
+        const merged = await fetchLeaderboard();
+        if (!cancelled && merged.length > 0) setLeaderboard(merged);
       } catch { /* fallback is already in localStorage init */ }
       try {
         const gp = await fetchGrandPrizeToday();
