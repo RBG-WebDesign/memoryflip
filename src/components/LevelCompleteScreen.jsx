@@ -111,14 +111,50 @@ export default function RoundCompleteScreen({
     active: true,
   });
 
-  // Prize tier progress
+  // Prize tier progress — two-phase meter
+  // Phase 1: show Regular Prize meter filling up to 100%
+  // Phase 2: after a delay, transition to Grand Prize meter
+  const regularTier = PRIZE_TIERS[0]; // threshold: 700
+  const grandTier = PRIZE_TIERS[PRIZE_TIERS.length - 1]; // threshold: 3000
+  const justEarnedRegular = displayScore >= regularTier.threshold && scoreAtRoundStart < regularTier.threshold;
+  const alreadyHadRegular = scoreAtRoundStart >= regularTier.threshold;
+
+  const [prizePhase, setPrizePhase] = useState(alreadyHadRegular ? 'grand' : 'regular');
+  const [regularCelebrate, setRegularCelebrate] = useState(false);
+
+  useEffect(() => {
+    if (!justEarnedRegular || prizePhase !== 'regular') return;
+    // Show regular prize filled for a moment, then transition to grand
+    playSound('victory', isMuted);
+    setRegularCelebrate(true);
+
+    // Staggered firework burst sounds — timed to match each burst's CSS delay
+    const popSounds = ['fireworkPop1', 'fireworkPop2', 'fireworkPop3', 'fireworkPop1', 'fireworkPop2'];
+    const burstTimers = popSounds.map((sound, i) => {
+      const delay = (i * 0.28 + 0.4) * 1000; // matches CSS: burst * 0.28s + 0.4s particle delay
+      return setTimeout(() => playSound(sound, isMuted), delay);
+    });
+
+    const t1 = setTimeout(() => {
+      setRegularCelebrate(false);
+      setPrizePhase('grand');
+    }, 2200);
+    return () => {
+      clearTimeout(t1);
+      burstTimers.forEach(clearTimeout);
+    };
+  }, [justEarnedRegular, prizePhase]);
+
+  const showingRegular = prizePhase === 'regular';
+  const meterTarget = showingRegular ? regularTier : grandTier;
+  const meterBase = showingRegular ? 0 : regularTier.threshold;
+  const meterRange = meterTarget.threshold - meterBase;
+  const meterValue = Math.max(0, displayScore - meterBase);
+  const progressPct = Math.min(100, (meterValue / meterRange) * 100);
+
   const currentPrizeTier = PRIZE_TIERS.reduce((best, tier) => {
     return displayScore >= tier.threshold ? tier : best;
   }, null);
-
-  const nextPrizeTier = PRIZE_TIERS.find(tier => displayScore < tier.threshold);
-  const progressTarget = nextPrizeTier || PRIZE_TIERS[PRIZE_TIERS.length - 1];
-  const progressPct = Math.min(100, (displayScore / progressTarget.threshold) * 100);
 
   const subtitle = useMemo(() => {
     if (isTallying) return 'Analyzing performance...';
@@ -132,12 +168,50 @@ export default function RoundCompleteScreen({
 
   return (
     <div className="absolute inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm font-['Inter',sans-serif] p-4">
+      {/* Fireworks for Regular Prize unlock — outside panel so they cover full screen */}
+      {regularCelebrate && (
+        <div className="lcs-fireworks-layer">
+          {Array.from({ length: 5 }).map((_, burst) => {
+            const cx = 10 + burst * 20 + Math.random() * 8;
+            const cy = 10 + Math.random() * 35;
+            const delay = burst * 0.28;
+            return (
+              <div key={burst} className="lcs-firework-burst" style={{ left: `${cx}%`, top: `${cy}%` }}>
+                <div
+                  className="lcs-firework-trail"
+                  style={{ '--fw-delay': `${delay}s` }}
+                />
+                {Array.from({ length: 16 }).map((_, i) => {
+                  const angle = (i / 16) * Math.PI * 2;
+                  const dist = 50 + Math.random() * 70;
+                  const colors = ['#facc15', '#00d4ff', '#ff6b6b', '#6c3ce0', '#ffffff', '#f59e0b'];
+                  return (
+                    <div
+                      key={i}
+                      className="lcs-firework-particle"
+                      style={{
+                        '--fw-tx': `${Math.cos(angle) * dist}px`,
+                        '--fw-ty': `${Math.sin(angle) * dist}px`,
+                        '--fw-size': `${3 + Math.random() * 4}px`,
+                        '--fw-delay': `${delay + 0.4}s`,
+                        '--fw-color': colors[i % colors.length],
+                        '--fw-fade-delay': `${delay + 0.4 + 0.35 + Math.random() * 0.25}s`,
+                      }}
+                    />
+                  );
+                })}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
       <div
         className={[
           'lcs-shell',
           'lcs-glow',
           finishPulse ? 'lcs-finish-burst' : '',
-          'bg-[#151515] border border-[#2A2A2A] rounded-3xl p-6 sm:p-8 max-w-sm w-full relative overflow-hidden',
+          'bg-[#151515] border border-[#2A2A2A] rounded-3xl p-8 sm:p-10 max-w-lg w-full relative overflow-hidden',
         ].join(' ')}
       >
         <div className="absolute top-0 right-0 w-32 h-32 bg-[#00d4ff] rounded-full mix-blend-screen blur-[60px] opacity-20 pointer-events-none" />
@@ -168,115 +242,144 @@ export default function RoundCompleteScreen({
 
         <div className="relative z-10 text-center">
           {/* Header */}
-          <div className="mb-2">
-            <span className="text-gray-500 text-[10px] tracking-[0.3em] uppercase font-medium">
+          <div className="mb-3">
+            <span className="text-gray-500 text-xs sm:text-sm tracking-[0.3em] uppercase font-medium">
               Round {round} of 8
             </span>
           </div>
 
           <Trophy
-            size={48}
-            className="lcs-trophy-float mx-auto text-[#00d4ff] mb-3 drop-shadow-[0_0_16px_rgba(0,212,255,0.35)]"
+            size={56}
+            className="lcs-trophy-float mx-auto text-[#00d4ff] mb-4 drop-shadow-[0_0_16px_rgba(0,212,255,0.35)]"
           />
 
-          <h2 className="text-2xl sm:text-3xl font-light text-white mb-1 tracking-wide">
+          <h2 className="text-3xl sm:text-4xl font-light text-white mb-2 tracking-wide">
             {isLastRound ? 'Game Complete' : 'Round Complete'}
           </h2>
 
-          <p className="text-gray-400 text-sm tracking-wide mb-5">
+          <p className="text-gray-400 text-base sm:text-lg tracking-wide mb-6">
             {subtitle}
           </p>
 
           {/* Stats row */}
-          <div className="flex justify-center gap-3 mb-4">
-            <div className="bg-[#1A1A1A] border border-[#2A2A2A] rounded-2xl px-3 py-3 flex flex-col items-center flex-1 shadow-inner">
-              <span className="text-gray-500 text-[10px] tracking-widest uppercase mb-1">Found</span>
+          <div className="flex justify-center gap-3 sm:gap-4 mb-5">
+            <div className="bg-[#1A1A1A] border border-[#2A2A2A] rounded-2xl px-4 py-4 flex flex-col items-center flex-1 shadow-inner">
+              <span className="text-gray-500 text-[11px] sm:text-xs tracking-widest uppercase mb-1.5">Found</span>
               <div className="flex items-center gap-1.5">
-                <CheckCircle size={16} className="text-[#0689D8]" />
-                <span className="text-xl font-mono font-semibold text-[#0689D8]">
+                <CheckCircle size={20} className="text-[#0689D8]" />
+                <span className="text-2xl sm:text-3xl font-mono font-semibold text-[#0689D8]">
                   {correctTaps}/{totalSamsung}
                 </span>
               </div>
             </div>
-            <div className="bg-[#1A1A1A] border border-[#2A2A2A] rounded-2xl px-3 py-3 flex flex-col items-center flex-1 shadow-inner">
-              <span className="text-gray-500 text-[10px] tracking-widest uppercase mb-1">Wrong</span>
+            <div className="bg-[#1A1A1A] border border-[#2A2A2A] rounded-2xl px-4 py-4 flex flex-col items-center flex-1 shadow-inner">
+              <span className="text-gray-500 text-[11px] sm:text-xs tracking-widest uppercase mb-1.5">Wrong</span>
               <div className="flex items-center gap-1.5">
-                <XCircle size={16} className={wrongTaps > 0 ? 'text-red-400' : 'text-gray-600'} />
-                <span className={`text-xl font-mono font-semibold ${wrongTaps > 0 ? 'text-red-400' : 'text-gray-600'}`}>
+                <XCircle size={20} className={wrongTaps > 0 ? 'text-red-400' : 'text-gray-600'} />
+                <span className={`text-2xl sm:text-3xl font-mono font-semibold ${wrongTaps > 0 ? 'text-red-400' : 'text-gray-600'}`}>
                   {wrongTaps}
                 </span>
               </div>
             </div>
             {isPerfect && (
-              <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-2xl px-3 py-3 flex flex-col items-center flex-1 shadow-inner">
-                <span className="text-yellow-400 text-[10px] tracking-widest uppercase mb-1">Bonus</span>
+              <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-2xl px-4 py-4 flex flex-col items-center flex-1 shadow-inner">
+                <span className="text-yellow-400 text-[11px] sm:text-xs tracking-widest uppercase mb-1.5">Bonus</span>
                 <div className="flex items-center gap-1.5">
-                  <Sparkles size={16} className="text-yellow-400" />
-                  <span className="text-xl font-mono font-semibold text-yellow-400">1.5x</span>
+                  <Sparkles size={20} className="text-yellow-400" />
+                  <span className="text-2xl sm:text-3xl font-mono font-semibold text-yellow-400">1.5x</span>
                 </div>
               </div>
             )}
           </div>
 
           {/* Score panel */}
-          <div className={`lcs-score-panel ${isTallying ? 'lcs-tallying' : ''} px-4 py-4 mb-4`}>
+          <div className={`lcs-score-panel ${isTallying ? 'lcs-tallying' : ''} px-5 py-5 mb-5`}>
             <div className="lcs-score-scan bg-gradient-to-r from-transparent via-white/10 to-transparent" />
 
-            <div className="lcs-score-kicker text-[10px] text-gray-500 uppercase mb-1">
+            <div className="lcs-score-kicker text-xs text-gray-500 uppercase mb-1.5">
               Round Score
             </div>
 
             <div
-              className={`lcs-score-number text-4xl sm:text-5xl font-black ${
+              className={`lcs-score-number text-5xl sm:text-6xl font-black ${
                 isTallying ? 'lcs-score-tallying' : 'lcs-score-done'
               }`}
             >
               +{displayLevelScore}
             </div>
 
-            <div className="text-[11px] text-gray-500 uppercase tracking-[0.16em] mt-2">
+            <div className="text-xs text-gray-500 uppercase tracking-[0.16em] mt-2.5">
               Total Score
             </div>
 
-            <div className="text-lg font-mono font-semibold text-white/85 mt-0.5">
+            <div className="text-xl sm:text-2xl font-mono font-semibold text-white/85 mt-1">
               {displayScore}
             </div>
           </div>
 
           {/* Prize tier progress */}
-          <div className="rounded-2xl px-4 py-3 mb-4 bg-[#0A0A0A] border border-[#2A2A2A]">
+          <div className={`rounded-2xl px-5 py-4 mb-5 border transition-all duration-500 ${
+            regularCelebrate
+              ? 'bg-[#0A0A0A] border-yellow-500/40 shadow-[0_0_20px_rgba(250,204,21,0.15)]'
+              : 'bg-[#0A0A0A] border-[#2A2A2A]'
+          }`}>
             <div className="flex items-center justify-between mb-1.5">
-              <span className="text-[10px] text-gray-500 tracking-widest uppercase font-medium">
-                {currentPrizeTier ? `Prize: ${currentPrizeTier.name}` : 'Next Prize'}
+              <span className={`text-[11px] sm:text-xs tracking-widest uppercase font-medium transition-colors duration-500 ${
+                regularCelebrate ? 'text-yellow-400' : 'text-gray-500'
+              }`}>
+                {regularCelebrate
+                  ? 'Regular Prize Unlocked!'
+                  : showingRegular
+                    ? (currentPrizeTier ? `Prize: ${currentPrizeTier.name}` : 'Next: Regular Prize')
+                    : (displayScore >= grandTier.threshold ? 'Grand Prize Earned!' : 'Next: Grand Prize')
+                }
               </span>
-              <span className="text-[10px] font-mono text-gray-400">
-                {displayScore} / {progressTarget.threshold}
+              <span className={`text-[11px] sm:text-xs font-mono transition-colors duration-500 ${
+                regularCelebrate ? 'text-yellow-400' : 'text-gray-400'
+              }`}>
+                {regularCelebrate
+                  ? '100%'
+                  : `${displayScore} / ${meterTarget.threshold}`
+                }
               </span>
             </div>
-            <div className="w-full h-1.5 bg-[#1A1A1A] rounded-full overflow-hidden">
+            <div className="w-full h-2.5 bg-[#1A1A1A] rounded-full overflow-hidden">
               <div
                 className="h-full rounded-full transition-all duration-700 ease-out"
                 style={{
                   width: `${progressPct}%`,
-                  background: displayScore >= PRIZE_TIERS[PRIZE_TIERS.length - 1].threshold
+                  background: regularCelebrate || (!showingRegular && displayScore >= grandTier.threshold)
                     ? 'linear-gradient(90deg, #facc15, #f59e0b)'
-                    : 'linear-gradient(90deg, #0689D8, #6c3ce0)',
+                    : showingRegular
+                      ? 'linear-gradient(90deg, #0689D8, #6c3ce0)'
+                      : 'linear-gradient(90deg, #0689D8, #6c3ce0)',
                 }}
               />
             </div>
-            {/* Prize tier markers */}
             <div className="flex justify-between mt-1.5">
-              {PRIZE_TIERS.map(tier => (
-                <span key={tier.tier} className={`text-[9px] font-mono ${displayScore >= tier.threshold ? 'text-yellow-400' : 'text-gray-600'}`}>
-                  {tier.threshold} — {tier.name}
-                </span>
-              ))}
+              {showingRegular ? (
+                <>
+                  <span className={`text-[10px] sm:text-[11px] font-mono ${displayScore >= 0 ? 'text-gray-500' : 'text-gray-600'}`}>0</span>
+                  <span className={`text-[10px] sm:text-[11px] font-mono ${displayScore >= regularTier.threshold ? 'text-yellow-400' : 'text-gray-600'}`}>
+                    {regularTier.threshold} — {regularTier.name}
+                  </span>
+                </>
+              ) : (
+                <>
+                  <span className={`text-[10px] sm:text-[11px] font-mono ${displayScore >= regularTier.threshold ? 'text-yellow-400' : 'text-gray-600'}`}>
+                    {regularTier.threshold} — {regularTier.name} ✓
+                  </span>
+                  <span className={`text-[10px] sm:text-[11px] font-mono ${displayScore >= grandTier.threshold ? 'text-yellow-400' : 'text-gray-600'}`}>
+                    {grandTier.threshold} — {grandTier.name}
+                  </span>
+                </>
+              )}
             </div>
           </div>
 
           {/* Result pill */}
-          <div className="flex justify-center mb-5">
-            <div className={`lcs-result-pill ${isPerfect && !isTallying ? 'lcs-result-gold' : ''}`}>
+          <div className="flex justify-center mb-6">
+            <div className={`lcs-result-pill text-sm ${isPerfect && !isTallying ? 'lcs-result-gold' : ''}`}>
               {isTallying
                 ? 'Tallying'
                 : grandPrizeEarned
@@ -296,7 +399,7 @@ export default function RoundCompleteScreen({
             <>
               <button
                 onClick={() => onGrandPrize?.()}
-                className="w-full flex items-center justify-center bg-gradient-to-r from-yellow-500 to-amber-600 text-black py-4 px-6 rounded-2xl font-bold tracking-wide transition-all duration-300 shadow-[0_4px_20px_rgba(250,204,21,0.3)] hover:shadow-[0_6px_30px_rgba(250,204,21,0.5)] hover:-translate-y-1 mb-2"
+                className="w-full flex items-center justify-center bg-gradient-to-r from-yellow-500 to-amber-600 text-black py-5 px-8 rounded-2xl text-lg font-bold tracking-wide transition-all duration-300 shadow-[0_4px_20px_rgba(250,204,21,0.3)] hover:shadow-[0_6px_30px_rgba(250,204,21,0.5)] hover:-translate-y-1 mb-2"
               >
                 <Trophy size={18} className="mr-2" />
                 Claim Grand Prize
@@ -313,7 +416,7 @@ export default function RoundCompleteScreen({
               <button
                 onClick={() => !isTallying && onAdvance?.()}
                 disabled={isTallying}
-                className={`w-full flex items-center justify-center bg-gradient-to-r from-[#00b4d8] to-[#6c3ce0] text-white py-4 px-6 rounded-2xl font-semibold tracking-wide transition-all duration-300 shadow-[0_4px_15px_rgba(0,180,216,0.3)] ${
+                className={`w-full flex items-center justify-center bg-gradient-to-r from-[#00b4d8] to-[#6c3ce0] text-white py-5 px-8 rounded-2xl text-lg font-semibold tracking-wide transition-all duration-300 shadow-[0_4px_15px_rgba(0,180,216,0.3)] ${
                   isTallying
                     ? 'opacity-50 cursor-not-allowed grayscale'
                     : 'hover:from-[#00d4ff] hover:to-[#9b30ff] hover:shadow-[0_6px_25px_rgba(0,180,216,0.5)] hover:-translate-y-1'
@@ -325,7 +428,7 @@ export default function RoundCompleteScreen({
               <button
                 onClick={() => !isTallying && onReturn?.()}
                 disabled={isTallying}
-                className={`w-full flex items-center justify-center text-gray-400 hover:text-white py-2 px-6 rounded-xl text-sm tracking-wide transition-all duration-300 mt-2 ${
+                className={`w-full flex items-center justify-center text-gray-400 hover:text-white py-3 px-6 rounded-xl text-base tracking-wide transition-all duration-300 mt-3 ${
                   isTallying ? 'opacity-50 cursor-not-allowed' : ''
                 }`}
               >

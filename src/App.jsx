@@ -4,7 +4,7 @@ import SpaceBackground from './components/background/SpaceBackground';
 import RoundCompleteScreen from './components/LevelCompleteScreen';
 import { ALL_ICONS, SAMSUNG_PRODUCTS, DECOY_ICONS, ROUND_CONFIG, PRIZE_TIERS, addGrandPrizeWinner, resetGrandPrizeToday, isGrandPrizeDisabled, setGrandPrizeDisabled, getGrandPrizeWinnersToday, GRAND_PRIZE_DAILY_MAX, getSwapCount } from './constants/config';
 import GrandPrizeScreen from './components/GrandPrizeScreen';
-import { playSound, initAudio, startMusic, stopMusic, setMusicVolume, setSfxVolume, speakGo } from './utils/audio';
+import { playSound, initAudio, startMusic, stopMusic, setMusicVolume, setSfxVolume, speakGo, distortAndStopMusic, startDrone, stopDrone, playGameOverJingle } from './utils/audio';
 import { shuffleArray } from './utils/helpers';
 import { fetchLeaderboard, addLeaderboardEntry, clearLeaderboard, fetchGrandPrizeToday, addGrandPrizeWinnerRemote, resetGrandPrizeTodayRemote } from './utils/api';
 import samsungLogo from './assets/logo/Samsung_Orig_Wordmark_WHITE_RGB.png';
@@ -67,11 +67,25 @@ export default function App() {
   const [revealCountdown, setRevealCountdown] = useState(null);
 
   // ─── UI State ───
+  // ── TEST DATA (remove before production) ──
+  const TEST_LEADERBOARD = [
+    { name: 'AUSTIN', score: 4200, date: '3/16/2026', round: 8 },
+    { name: 'JENNY', score: 3850, date: '3/15/2026', round: 8 },
+    { name: 'MARCUS', score: 3400, date: '3/15/2026', round: 8 },
+    { name: 'SOPHIA', score: 2900, date: '3/14/2026', round: 7 },
+    { name: 'DAVID K', score: 2650, date: '3/14/2026', round: 7 },
+    { name: 'EMILY', score: 2100, date: '3/13/2026', round: 6 },
+    { name: 'CHRIS P', score: 1800, date: '3/13/2026', round: 5 },
+    { name: 'SARAH M', score: 1450, date: '3/12/2026', round: 5 },
+    { name: 'JAMES', score: 1050, date: '3/12/2026', round: 4 },
+    { name: 'OLIVIA', score: 800, date: '3/11/2026', round: 3 },
+  ];
   const [leaderboard, setLeaderboard] = useState(() => {
     try {
       const saved = localStorage.getItem('galaxy-sync-leaderboard');
-      return saved ? JSON.parse(saved) : [];
-    } catch { return []; }
+      const parsed = saved ? JSON.parse(saved) : [];
+      return [...parsed, ...TEST_LEADERBOARD].sort((a, b) => b.score - a.score);
+    } catch { return TEST_LEADERBOARD; }
   });
   const [isMuted, setIsMuted] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -88,6 +102,7 @@ export default function App() {
   const [showMissedReveal, setShowMissedReveal] = useState(false);
   const [loadProgress, setLoadProgress] = useState(0);
   const [assetsReady, setAssetsReady] = useState(false);
+  const [showcasePhase, setShowcasePhase] = useState('enter'); // 'enter' | 'display' | 'disperse'
 
   // ─── Admin State ───
   const [showAdminPanel, setShowAdminPanel] = useState(false);
@@ -153,9 +168,13 @@ export default function App() {
     assets.push({ type: 'image', src: memoryFlipLogo });
     assets.push({ type: 'image', src: cardMetallicBase });
     assets.push({ type: 'image', src: cardSemiconductorGold });
+    // Logo videos (desktop only — mobile uses static PNG already preloaded above)
+    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || window.innerWidth < 768;
+    if (!isMobile) {
+      assets.push({ type: 'video', src: memoryFlipIntro });
+      assets.push({ type: 'video', src: memoryFlipLoop });
+    }
     // Videos
-    assets.push({ type: 'video', src: memoryFlipIntro });
-    assets.push({ type: 'video', src: memoryFlipLoop });
     assets.push({ type: 'video', src: cardMetallicSheen });
 
     let loaded = 0;
@@ -199,7 +218,7 @@ export default function App() {
     (async () => {
       try {
         const cloud = await fetchLeaderboard();
-        if (!cancelled && cloud.length > 0) setLeaderboard(cloud);
+        if (!cancelled && cloud.length > 0) setLeaderboard(prev => [...cloud, ...TEST_LEADERBOARD].sort((a, b) => b.score - a.score));
       } catch { /* fallback is already in localStorage init */ }
       try {
         const gp = await fetchGrandPrizeToday();
@@ -533,6 +552,13 @@ export default function App() {
         playSound('elimination', isMuted);
         bgRef.current?.gameOver();
         pendingScoreRef.current = { score: scoreRef.current, round: roundRef.current };
+        // Distort & slow the music, then start ominous drone
+        if (!isMuted) {
+          distortAndStopMusic(() => {
+            startDrone();
+            playGameOverJingle(isMuted);
+          });
+        }
         setGameState('GAME_OVER');
       }, 2000);
     }
@@ -625,14 +651,19 @@ export default function App() {
   // ─── Music management ───
   useEffect(() => {
     if (!audioReady) return;
-    if (isMuted) { stopMusic(); return; }
+    if (isMuted) { stopMusic(); stopDrone(); return; }
 
-    if (gameState === 'GAME_OVER' || gameState === 'NAME_INPUT' || gameState === 'RANK_REVEAL') {
-      stopMusic();
+    if (gameState === 'GAME_OVER' || gameState === 'NAME_INPUT') {
+      // Music is handled by distortAndStopMusic; drone is playing — don't interfere
+      return;
+    }
+    if (gameState === 'RANK_REVEAL') {
+      stopDrone();
       return;
     }
 
-    const isInGame = ['DEAL', 'REVEAL', 'SHUFFLING', 'SELECTION', 'ROUND_COMPLETE', 'GRAND_PRIZE'].includes(gameState);
+    const isInGame = ['PRODUCT_SHOWCASE', 'TUTORIAL', 'DEAL', 'REVEAL', 'SHUFFLING', 'SELECTION', 'ROUND_COMPLETE', 'GRAND_PRIZE'].includes(gameState);
+    stopDrone(); // ensure drone is off when returning to menu or starting a game
     if (isInGame) {
       startMusic('ingame');
     } else {
@@ -699,12 +730,40 @@ export default function App() {
       setRankRevealData({ rank, entry: newEntry });
       pendingScoreRef.current = null;
       setPlayerName('');
-      triggerTransition(() => setGameState('RANK_REVEAL'), 'none');
+      triggerTransition(() => setGameState('RANK_REVEAL'), 'menu');
     } else {
       setPlayerName('');
       triggerTransition(() => setGameState('MENU'), 'menu');
     }
   }, [playerName, leaderboard, saveScore, triggerTransition]);
+
+  // ─── PRODUCT_SHOWCASE timing ───
+  useEffect(() => {
+    if (gameState !== 'PRODUCT_SHOWCASE') return;
+    let t1, t3;
+    if (showcasePhase === 'enter') {
+      t1 = setTimeout(() => setShowcasePhase('display'), 1200);
+    } else if (showcasePhase === 'disperse') {
+      t3 = setTimeout(() => {
+        setGameState('TUTORIAL');
+      }, 900);
+    }
+    return () => { clearTimeout(t1); clearTimeout(t3); };
+  }, [gameState, showcasePhase]);
+
+  const handleShowcaseDismiss = useCallback(() => {
+    if (showcasePhase !== 'display') return;
+    setShowcasePhase('disperse');
+    playSound('warpWoosh', isMuted);
+  }, [showcasePhase, isMuted]);
+
+  const handleTutorialSkip = useCallback(() => {
+    playSound('menuSelect', isMuted);
+    triggerTransition(() => {
+      setupRound(1);
+    }, 'next');
+  }, [isMuted, triggerTransition, setupRound]);
+
 
   // ═══════════════════════════════════════════
   //  RENDER FUNCTIONS
@@ -750,31 +809,40 @@ export default function App() {
         </div>
         <div className="start-screen__title-section">
           <h1 className="start-screen__title start-screen__title--logo">
-            {supportsWebM.current ? (
+            {!prefersReducedMotion.current && !(/iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || window.innerWidth < 768) ? (
               <>
+                {/* Desktop: WebM intro → loop */}
                 <video
                   ref={(el) => {
                     if (!el) return;
-                    el.play().catch(() => {});
+                    el.play().catch(() => {
+                      el.style.display = 'none';
+                      const fallback = el.parentElement.querySelector('.logo-fallback');
+                      if (fallback) fallback.style.display = '';
+                    });
                     el.onended = () => {
                       el.style.display = 'none';
                       const loop = el.parentElement.querySelector('.logo-video-loop');
                       if (loop) {
                         loop.style.display = '';
-                        loop.play().catch(() => {});
+                        loop.play().catch(() => {
+                          loop.style.display = 'none';
+                          const fallback = loop.parentElement.querySelector('.logo-fallback');
+                          if (fallback) fallback.style.display = '';
+                        });
                       }
                     };
                   }}
-                  src={memoryFlipIntro}
                   poster={memoryFlipLogo}
                   width={800}
                   height={360}
                   className="logo-video"
                   muted
                   playsInline
-                />
+                >
+                  <source src={memoryFlipIntro} type="video/webm" />
+                </video>
                 <video
-                  src={memoryFlipLoop}
                   width={800}
                   height={360}
                   className="logo-video logo-video-loop"
@@ -783,6 +851,17 @@ export default function App() {
                   playsInline
                   loop
                   preload="auto"
+                >
+                  <source src={memoryFlipLoop} type="video/webm" />
+                </video>
+                {/* PNG fallback if video fails */}
+                <img
+                  src={memoryFlipLogo}
+                  alt="Memory Flip"
+                  width={800}
+                  height={360}
+                  className="logo-video logo-fallback"
+                  style={{ display: 'none' }}
                 />
               </>
             ) : (
@@ -809,11 +888,14 @@ export default function App() {
             className="start-screen__btn start-screen__btn--primary"
             onClick={() => {
               playSound('menuSelect', isMuted);
+              initAudio();
+              setAudioReady(true);
               triggerTransition(() => {
                 setScore(0);
                 setRoundScore(0);
                 setScoreAtRoundStart(0);
-                setupRound(1);
+                setShowcasePhase('enter');
+                setGameState('PRODUCT_SHOWCASE');
               }, 'start');
             }}
           >
@@ -883,25 +965,25 @@ export default function App() {
       <div
         key={`${i}-${entry.name}`}
         ref={isPlayer ? playerRowRef : undefined}
-        className={`lb-row flex justify-between items-center text-xs sm:text-sm py-3 px-3 sm:px-4 rounded-xl transition-colors ${
+        className={`lb-row flex justify-between items-center py-3.5 sm:py-4 px-3.5 sm:px-5 rounded-xl transition-colors ${
           isPlayer ? 'lb-row--player' : i % 2 === 0 ? 'bg-white/[0.02]' : 'bg-transparent'
         }`}
       >
-        <div className="flex items-center min-w-0 gap-2.5 sm:gap-3">
+        <div className="flex items-center min-w-0 gap-3 sm:gap-3.5">
           <span className={`lb-rank-badge shrink-0 ${
             i === 0 ? 'lb-rank--gold' : i === 1 ? 'lb-rank--silver' : i === 2 ? 'lb-rank--bronze' : ''
           }`}>
             {i + 1}
           </span>
           <span className="flex flex-col min-w-0">
-            <span className="text-white/90 font-semibold truncate flex items-center gap-2 text-xs sm:text-sm">
+            <span className="text-white/90 font-semibold truncate flex items-center gap-2 text-sm sm:text-base">
               {entry.name || 'Anonymous'}
               {isPlayer && <span className="lb-you-pill shrink-0">YOU</span>}
             </span>
-            <span className="text-[10px] sm:text-[11px] text-gray-500 mt-0.5">{entry.date}{entry.round ? ` · Round ${entry.round}` : ''}</span>
+            <span className="text-[11px] sm:text-xs text-gray-500 mt-0.5">{entry.date}{entry.round ? ` · Round ${entry.round}` : ''}</span>
           </span>
         </div>
-        <span className="font-mono font-bold text-white tracking-wider text-sm sm:text-base shrink-0 ml-3">{entry.score}<span className="text-[10px] sm:text-xs font-normal text-gray-500 ml-1">pts</span></span>
+        <span className="font-mono font-bold text-white tracking-wider text-base sm:text-lg shrink-0 ml-3">{entry.score}<span className="text-[11px] sm:text-sm font-normal text-gray-500 ml-1">pts</span></span>
       </div>
     );
   };
@@ -946,7 +1028,7 @@ export default function App() {
             )}
           </div>
 
-          <button className="start-screen__btn start-screen__btn--secondary w-full" onClick={() => { playSound('click', isMuted); triggerTransition(() => setGameState('MENU'), 'none'); }}>
+          <button className="start-screen__btn start-screen__btn--secondary w-full" onClick={() => { playSound('click', isMuted); triggerTransition(() => setGameState('MENU'), 'menu'); }}>
             <span className="start-screen__btn-inner">
               <span className="start-screen__btn-icon" aria-hidden="true"><Home size={18} /></span>
               Back to Main Menu
@@ -1001,7 +1083,7 @@ export default function App() {
               <button
                 className="text-xs tracking-[0.2em] uppercase font-semibold transition-colors px-4 py-2 rounded-lg border border-white/10 hover:border-white/20 hover:bg-white/5"
                 style={{ color: accentColor }}
-                onClick={() => { setRankRevealData(null); triggerTransition(() => setGameState('LEADERBOARD'), 'none'); }}
+                onClick={() => { setRankRevealData(null); triggerTransition(() => setGameState('LEADERBOARD'), 'menu'); }}
               >
                 View Top 50
               </button>
@@ -1304,9 +1386,9 @@ export default function App() {
             className="start-screen__btn start-screen__btn--secondary w-full"
             onClick={() => { playSound('click', isMuted); pendingScoreRef.current = null; triggerTransition(() => setGameState('MENU'), 'menu'); }}
           >
-            <span className="start-screen__btn-inner">
-              <span className="start-screen__btn-icon" aria-hidden="true"><Home size={18} /></span>
-              Skip & Main Menu
+            <span className="start-screen__btn-inner text-xs sm:text-sm">
+              <span className="start-screen__btn-icon" aria-hidden="true"><Home size={16} /></span>
+              Skip to Main Menu
             </span>
           </button>
         </div>
@@ -1351,14 +1433,14 @@ export default function App() {
             )}
           </div>
 
-          <div className="w-full bg-[#1A1A1A]/80 border border-[#2A2A2A] backdrop-blur-md rounded-2xl p-2 sm:p-3 mb-4 shadow-2xl">
+          <div className="name-keyboard w-full bg-[#1A1A1A]/80 border border-[#2A2A2A] backdrop-blur-md rounded-2xl p-2 sm:p-3 mb-4 shadow-2xl">
             {kbRows.map((row, ri) => (
               <div key={ri} className="flex justify-center gap-[5px] sm:gap-1.5 mb-[5px] sm:mb-1.5">
                 {row.map((key) => (
                   <button
                     key={key}
                     onClick={() => handleKey(key)}
-                    className="w-[30px] h-[40px] sm:w-[38px] sm:h-[46px] md:w-[42px] md:h-[50px] bg-[#252525] hover:bg-[#333] active:bg-[#0689D8] active:scale-95 border border-[#3a3a3a] rounded-lg text-white text-sm sm:text-base font-semibold transition-all duration-100 select-none touch-manipulation"
+                    className="kb-key w-[30px] h-[40px] sm:w-[38px] sm:h-[46px] md:w-[42px] md:h-[50px] bg-[#252525] hover:bg-[#333] active:bg-[#0689D8] active:scale-95 border border-[#3a3a3a] rounded-lg text-white text-sm sm:text-base font-semibold transition-all duration-100 select-none touch-manipulation"
                   >
                     {key}
                   </button>
@@ -1368,19 +1450,19 @@ export default function App() {
             <div className="flex justify-center gap-[5px] sm:gap-1.5">
               <button
                 onClick={() => handleKey('DEL')}
-                className="h-[40px] sm:h-[46px] md:h-[50px] px-3 sm:px-4 bg-[#302020] hover:bg-[#443030] active:bg-red-500 active:scale-95 border border-[#3a3a3a] rounded-lg text-red-400 active:text-white text-xs sm:text-sm font-semibold tracking-wider transition-all duration-100 select-none touch-manipulation"
+                className="kb-action h-[40px] sm:h-[46px] md:h-[50px] px-3 sm:px-4 bg-[#302020] hover:bg-[#443030] active:bg-red-500 active:scale-95 border border-[#3a3a3a] rounded-lg text-red-400 active:text-white text-xs sm:text-sm font-semibold tracking-wider transition-all duration-100 select-none touch-manipulation"
               >
                 DEL
               </button>
               <button
                 onClick={() => handleKey('SPACE')}
-                className="flex-1 h-[40px] sm:h-[46px] md:h-[50px] bg-[#252525] hover:bg-[#333] active:bg-[#0689D8] active:scale-95 border border-[#3a3a3a] rounded-lg text-gray-400 text-xs sm:text-sm font-semibold tracking-widest transition-all duration-100 select-none touch-manipulation"
+                className="kb-action flex-1 h-[40px] sm:h-[46px] md:h-[50px] bg-[#252525] hover:bg-[#333] active:bg-[#0689D8] active:scale-95 border border-[#3a3a3a] rounded-lg text-gray-400 text-xs sm:text-sm font-semibold tracking-widest transition-all duration-100 select-none touch-manipulation"
               >
                 SPACE
               </button>
               <button
                 onClick={handleNameSubmit}
-                className="h-[40px] sm:h-[46px] md:h-[50px] px-4 sm:px-6 bg-[#0689D8] hover:bg-[#07a0f5] active:bg-[#0560a0] active:scale-95 border border-[#0689D8]/50 rounded-lg text-white text-xs sm:text-sm font-bold tracking-wider transition-all duration-100 select-none touch-manipulation shadow-[0_0_15px_rgba(6,137,216,0.3)]"
+                className="kb-action h-[40px] sm:h-[46px] md:h-[50px] px-4 sm:px-6 bg-[#0689D8] hover:bg-[#07a0f5] active:bg-[#0560a0] active:scale-95 border border-[#0689D8]/50 rounded-lg text-white text-xs sm:text-sm font-bold tracking-wider transition-all duration-100 select-none touch-manipulation shadow-[0_0_15px_rgba(6,137,216,0.3)]"
               >
                 SAVE
               </button>
@@ -1724,6 +1806,142 @@ export default function App() {
     );
   };
 
+  // ─── Product Showcase Screen ───
+  const showcaseDisperseVectors = useMemo(() =>
+    SAMSUNG_PRODUCTS.map((_, i) => {
+      const angle = (i / SAMSUNG_PRODUCTS.length) * 360 + (Math.random() * 40 - 20);
+      const rad = angle * (Math.PI / 180);
+      const dist = 600 + Math.random() * 400;
+      return { tx: Math.cos(rad) * dist, ty: Math.sin(rad) * dist, angle };
+    }),
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  [gameState === 'PRODUCT_SHOWCASE']);
+
+  const renderProductShowcase = () => {
+    return (
+      <div
+        className="flex flex-col items-center justify-center w-full h-full min-h-screen min-h-[100dvh] px-4"
+        onClick={handleShowcaseDismiss}
+        style={{ cursor: showcasePhase === 'display' ? 'pointer' : 'default' }}
+      >
+        {/* Title */}
+        <div className={`text-center mb-6 sm:mb-8 transition-all duration-700 ${showcasePhase === 'enter' ? 'opacity-0 translate-y-4' : showcasePhase === 'disperse' ? 'opacity-0 -translate-y-8 scale-95' : 'opacity-100 translate-y-0'}`}>
+          <p className="text-sm sm:text-xl md:text-2xl tracking-[0.3em] uppercase text-[#0689D8] font-bold mb-2 sm:mb-3" style={{ fontFamily: 'SamsungSharpSans-Bold, sans-serif' }}>
+            Memorize These Products
+          </p>
+          <p className="text-xs sm:text-sm md:text-base tracking-[0.15em] uppercase text-gray-400">
+            Find them during each round
+          </p>
+        </div>
+
+        {/* Product Grid */}
+        <div className="grid grid-cols-4 sm:grid-cols-4 gap-4 sm:gap-6 md:gap-8 max-w-2xl mx-auto">
+          {SAMSUNG_PRODUCTS.map((product, i) => {
+            const { tx, ty, angle } = showcaseDisperseVectors[i] || { tx: 0, ty: 0, angle: 0 };
+
+            return (
+              <div
+                key={product.name}
+                className="flex flex-col items-center gap-2 sm:gap-3 transition-all"
+                style={{
+                  transitionDuration: showcasePhase === 'disperse' ? '800ms' : '600ms',
+                  transitionTimingFunction: showcasePhase === 'disperse'
+                    ? 'cubic-bezier(.55, 0, 1, .45)'
+                    : 'cubic-bezier(.16, 1, .3, 1)',
+                  transitionDelay: showcasePhase === 'enter'
+                    ? `${150 + i * 80}ms`
+                    : showcasePhase === 'disperse'
+                      ? `${i * 30}ms`
+                      : '0ms',
+                  opacity: showcasePhase === 'enter' ? 0 : showcasePhase === 'disperse' ? 0 : 1,
+                  transform: showcasePhase === 'enter'
+                    ? 'scale(0.3) translateY(30px)'
+                    : showcasePhase === 'disperse'
+                      ? `translate(${tx}px, ${ty}px) scale(0.2) rotate(${angle}deg)`
+                      : 'scale(1) translateY(0)',
+                }}
+              >
+                <div className="w-24 h-24 sm:w-28 sm:h-28 md:w-36 md:h-36 rounded-xl bg-white/[0.06] backdrop-blur-sm border border-white/[0.08] flex items-center justify-center p-3 sm:p-4 shadow-lg shadow-black/20">
+                  <img src={product.icon} alt={product.name} className="w-full h-full object-contain drop-shadow-[0_0_8px_rgba(6,137,216,0.3)]" draggable={false} />
+                </div>
+                <span className="text-[11px] sm:text-sm md:text-base text-gray-300 tracking-wider text-center leading-tight whitespace-nowrap" style={{ fontFamily: 'SamsungSharpSans-Medium, sans-serif' }}>
+                  {product.name}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Tap to continue */}
+        <div className={`mt-8 sm:mt-12 transition-all duration-700 ${showcasePhase === 'display' ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'}`}>
+          <span className="text-[11px] sm:text-xs tracking-[0.3em] uppercase text-gray-400 animate-pulse" style={{ fontFamily: 'SamsungSharpSans-Medium, sans-serif' }}>
+            Tap to Continue
+          </span>
+        </div>
+      </div>
+    );
+  };
+
+  const renderTutorial = () => (
+    <div className="flex flex-col items-center justify-center w-full h-full min-h-screen min-h-[100dvh] px-4">
+      <div className="start-screen__content tutorial-content" style={{ animation: 'contentFadeIn 0.8s cubic-bezier(0.16, 1, 0.3, 1)' }}>
+        <p className="text-lg sm:text-2xl md:text-4xl tracking-[0.3em] uppercase text-[#0689D8] font-bold" style={{ fontFamily: 'SamsungSharpSans-Bold, sans-serif' }}>
+          How to Play
+        </p>
+
+        <div className="flex flex-col gap-6 sm:gap-8 md:gap-10 w-full max-w-lg">
+          {/* Step 1 */}
+          <div className="flex items-start gap-4 sm:gap-5 md:gap-6">
+            <div className="w-14 h-14 sm:w-18 sm:h-18 md:w-20 md:h-20 rounded-xl bg-[#0689D8]/10 border border-[#0689D8]/20 flex items-center justify-center flex-shrink-0" style={{ minWidth: '3.5rem' }}>
+              <Eye className="text-[#0689D8] w-6 h-6 sm:w-8 sm:h-8 md:w-9 md:h-9" />
+            </div>
+            <div>
+              <p className="text-base sm:text-lg md:text-xl text-white font-semibold mb-1" style={{ fontFamily: 'SamsungSharpSans-Bold, sans-serif' }}>Watch the Reveal</p>
+              <p className="text-sm sm:text-base md:text-lg text-gray-400 leading-relaxed">Samsung products are briefly shown face-up. Memorize their positions.</p>
+            </div>
+          </div>
+
+          {/* Step 2 */}
+          <div className="flex items-start gap-4 sm:gap-5 md:gap-6">
+            <div className="w-14 h-14 sm:w-18 sm:h-18 md:w-20 md:h-20 rounded-xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center flex-shrink-0" style={{ minWidth: '3.5rem' }}>
+              <Shuffle className="text-purple-400 w-6 h-6 sm:w-8 sm:h-8 md:w-9 md:h-9" />
+            </div>
+            <div>
+              <p className="text-base sm:text-lg md:text-xl text-white font-semibold mb-1" style={{ fontFamily: 'SamsungSharpSans-Bold, sans-serif' }}>Track the Shuffle</p>
+              <p className="text-sm sm:text-base md:text-lg text-gray-400 leading-relaxed">Cards flip face-down and shuffle. Keep your eyes on the Samsung products.</p>
+            </div>
+          </div>
+
+          {/* Step 3 */}
+          <div className="flex items-start gap-4 sm:gap-5 md:gap-6">
+            <div className="w-14 h-14 sm:w-18 sm:h-18 md:w-20 md:h-20 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center flex-shrink-0" style={{ minWidth: '3.5rem' }}>
+              <Target className="text-emerald-400 w-6 h-6 sm:w-8 sm:h-8 md:w-9 md:h-9" />
+            </div>
+            <div>
+              <p className="text-base sm:text-lg md:text-xl text-white font-semibold mb-1" style={{ fontFamily: 'SamsungSharpSans-Bold, sans-serif' }}>Tap to Find</p>
+              <p className="text-sm sm:text-base md:text-lg text-gray-400 leading-relaxed">Select the cards you think are Samsung products. More correct taps = higher score!</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-3 w-full max-w-lg mt-4">
+          <button
+            className="start-screen__btn start-screen__btn--primary w-full"
+            onClick={handleTutorialSkip}
+          >
+            <span className="start-screen__btn-glow" aria-hidden="true" />
+            <span className="start-screen__btn-inner">
+              <span className="start-screen__btn-icon" aria-hidden="true">
+                <Play size={18} fill="currentColor" />
+              </span>
+              START GAME
+            </span>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
   // ═══════════════════════════════════════════
   //  MAIN RENDER
   // ═══════════════════════════════════════════
@@ -1749,13 +1967,15 @@ export default function App() {
 
         {gameState === 'SPLASH' && renderSplash()}
         {gameState === 'MENU' && renderMenu()}
+        {gameState === 'PRODUCT_SHOWCASE' && renderProductShowcase()}
+        {gameState === 'TUTORIAL' && renderTutorial()}
         {gameState === 'LEADERBOARD' && renderLeaderboard()}
 
         {isInGame && (
           <>
             {renderSideInfo()}
             {renderHUD()}
-            <div className="flex flex-col items-center w-full h-full relative px-2 sm:px-4" style={{ paddingTop: 'var(--hud-h, 4.5rem)' }}>
+            <div className="flex flex-col items-center w-full h-full relative pr-2 sm:pr-4" style={{ paddingTop: 'var(--hud-h, 4.5rem)', paddingLeft: 'calc(var(--sidebar-barrier) + 0.5rem)' }}>
               <div className="flex-1 flex items-center justify-center w-full relative">
                 {renderGrid()}
               </div>

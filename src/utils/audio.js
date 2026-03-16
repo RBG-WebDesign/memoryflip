@@ -413,6 +413,75 @@ export const playGameOverJingle = (isMuted) => {
   lfo.stop(t + 3.3);
 };
 
+// ============================================================
+// Ominous drone — plays during GAME_OVER → NAME_INPUT
+// Low rumbling pad with subtle movement, routed through musicGain
+// ============================================================
+let droneNodes = null; // { oscs: [], gains: [], lfo, lfoGain, master, stop() }
+
+export const startDrone = () => {
+  if (!audioCtx || droneNodes) return;
+  const t = audioCtx.currentTime;
+
+  const droneMaster = audioCtx.createGain();
+  droneMaster.gain.setValueAtTime(0, t);
+  droneMaster.gain.linearRampToValueAtTime(0.18, t + 2.0); // slow fade in
+  droneMaster.connect(musicGain);
+
+  // Low fundamental + fifth for dark harmonic color
+  const freqs = [55, 82.5, 110]; // A1, E2, A2
+  const types = ['sine', 'triangle', 'sine'];
+  const vols = [0.5, 0.3, 0.15];
+  const oscs = [];
+  const gains = [];
+
+  freqs.forEach((freq, i) => {
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = types[i];
+    osc.frequency.value = freq;
+    gain.gain.value = vols[i];
+    osc.connect(gain);
+    gain.connect(droneMaster);
+    osc.start(t);
+    oscs.push(osc);
+    gains.push(gain);
+  });
+
+  // Slow LFO on the fundamental for eerie pulsing
+  const lfo = audioCtx.createOscillator();
+  const lfoGain = audioCtx.createGain();
+  lfo.type = 'sine';
+  lfo.frequency.value = 0.3; // very slow pulse
+  lfoGain.gain.value = 8; // subtle pitch wobble
+  lfo.connect(lfoGain);
+  lfoGain.connect(oscs[0].frequency);
+  lfo.start(t);
+
+  droneNodes = {
+    oscs, gains, lfo, lfoGain, master: droneMaster,
+    stop: () => {
+      const now = audioCtx.currentTime;
+      droneMaster.gain.setValueAtTime(droneMaster.gain.value, now);
+      droneMaster.gain.linearRampToValueAtTime(0, now + 1.0); // fade out
+      setTimeout(() => {
+        oscs.forEach(o => { try { o.stop(); o.disconnect(); } catch (_) {} });
+        gains.forEach(g => { try { g.disconnect(); } catch (_) {} });
+        try { lfo.stop(); lfo.disconnect(); } catch (_) {}
+        try { lfoGain.disconnect(); } catch (_) {}
+        try { droneMaster.disconnect(); } catch (_) {}
+        droneNodes = null;
+      }, 1200);
+    },
+  };
+};
+
+export const stopDrone = () => {
+  if (droneNodes) {
+    droneNodes.stop();
+  }
+};
+
 export const setMusicVolume = (vol) => {
   if (musicGain) musicGain.gain.value = vol;
 };
@@ -547,6 +616,57 @@ export const playSound = (type, isMuted) => {
         createOsc('sine', f, t + 0.3 + i * 0.04, 0.1, 0.03, sfxGain);
       });
       playNoise(t + 0.2, 0.08, 0.05, 8000, sfxGain);
+      break;
+    }
+
+    // --- Firework pop/crackle (varied per burst) ---
+    case 'fireworkPop1': {
+      // Rising whistle + pop
+      if (!audioCtx) return;
+      const fw1 = audioCtx.createOscillator();
+      const fw1g = audioCtx.createGain();
+      fw1.type = 'sine';
+      fw1.frequency.setValueAtTime(600, t);
+      fw1.frequency.exponentialRampToValueAtTime(2400, t + 0.12);
+      fw1g.gain.setValueAtTime(0.06, t);
+      fw1g.gain.exponentialRampToValueAtTime(0.001, t + 0.15);
+      fw1.connect(fw1g);
+      fw1g.connect(sfxGain);
+      fw1.start(t);
+      fw1.stop(t + 0.16);
+      // Crackle burst
+      playNoise(t + 0.1, 0.12, 0.08, 6000, sfxGain);
+      playKick(t + 0.11, 0.05, sfxGain);
+      break;
+    }
+    case 'fireworkPop2': {
+      // Higher whistle + sparkle
+      if (!audioCtx) return;
+      const fw2 = audioCtx.createOscillator();
+      const fw2g = audioCtx.createGain();
+      fw2.type = 'sine';
+      fw2.frequency.setValueAtTime(800, t);
+      fw2.frequency.exponentialRampToValueAtTime(3200, t + 0.1);
+      fw2g.gain.setValueAtTime(0.05, t);
+      fw2g.gain.exponentialRampToValueAtTime(0.001, t + 0.13);
+      fw2.connect(fw2g);
+      fw2g.connect(sfxGain);
+      fw2.start(t);
+      fw2.stop(t + 0.14);
+      // Sparkle crackle
+      playNoise(t + 0.08, 0.15, 0.07, 8000, sfxGain);
+      [2000, 2600, 3100].forEach((f, i) => {
+        createOsc('sine', f, t + 0.1 + i * 0.03, 0.08, 0.025, sfxGain);
+      });
+      break;
+    }
+    case 'fireworkPop3': {
+      // Deep thump + wide crackle
+      if (!audioCtx) return;
+      playKick(t, 0.07, sfxGain);
+      playNoise(t + 0.05, 0.18, 0.09, 4000, sfxGain);
+      createOsc('triangle', 1200, t + 0.06, 0.1, 0.04, sfxGain);
+      createOsc('sine', 1800, t + 0.09, 0.08, 0.03, sfxGain);
       break;
     }
 

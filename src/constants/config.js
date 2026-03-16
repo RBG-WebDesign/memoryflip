@@ -77,24 +77,24 @@ export const ALL_ICONS = [...SAMSUNG_PRODUCTS, ...DECOY_ICONS];
 // Shuffle speed = duration of each swap animation in ms
 // Shuffle pause = pause between consecutive swaps in ms
 export const ROUND_CONFIG = [
-  { round: 1, rows: 2, cols: 3, samsungCount: 1, taps: 2, revealTime: 4000, selectionTime: 8,  swapCount: [3, 4],   swapDuration: 600, swapPause: 400, pointsPerProduct: 50  },
-  { round: 2, rows: 3, cols: 3, samsungCount: 2, taps: 3, revealTime: 4000, selectionTime: 8,  swapCount: [4, 6],   swapDuration: 450, swapPause: 250, pointsPerProduct: 75  },
-  { round: 3, rows: 3, cols: 4, samsungCount: 3, taps: 4, revealTime: 4000, selectionTime: 8,  swapCount: [8, 10],  swapDuration: 300, swapPause: 150, pointsPerProduct: 100 },
-  { round: 4, rows: 4, cols: 4, samsungCount: 4, taps: 5, revealTime: 4000, selectionTime: 7,  swapCount: [8, 10],  swapDuration: 250, swapPause: 100, pointsPerProduct: 150 },
-  { round: 5, rows: 4, cols: 5, samsungCount: 5, taps: 6, revealTime: 5000, selectionTime: 6,  swapCount: [12, 14], swapDuration: 200, swapPause: 80,  pointsPerProduct: 200 },
-  { round: 6, rows: 4, cols: 5, samsungCount: 5, taps: 6, revealTime: 5000, selectionTime: 5,  swapCount: [14, 16], swapDuration: 160, swapPause: 50,  pointsPerProduct: 250 },
-  { round: 7, rows: 5, cols: 5, samsungCount: 5, taps: 6, revealTime: 4000, selectionTime: 5,  swapCount: [16, 18], swapDuration: 140, swapPause: 40,  pointsPerProduct: 350 },
-  { round: 8, rows: 5, cols: 5, samsungCount: 5, taps: 5, revealTime: 4000, selectionTime: 4,  swapCount: [18, 20], swapDuration: 120, swapPause: 30,  pointsPerProduct: 500 },
+  { round: 1, rows: 2, cols: 3, samsungCount: 1, taps: 2, revealTime: 4000, selectionTime: 8,  swapCount: [3, 4],   swapDuration: 900, swapPause: 600, pointsPerProduct: 50  },
+  { round: 2, rows: 3, cols: 3, samsungCount: 2, taps: 3, revealTime: 4000, selectionTime: 8,  swapCount: [4, 6],   swapDuration: 900, swapPause: 600, pointsPerProduct: 75  },
+  { round: 3, rows: 3, cols: 4, samsungCount: 3, taps: 4, revealTime: 4500, selectionTime: 9,  swapCount: [6, 8],   swapDuration: 900, swapPause: 600, pointsPerProduct: 100 },
+  { round: 4, rows: 4, cols: 4, samsungCount: 4, taps: 5, revealTime: 4500, selectionTime: 8,  swapCount: [6, 8],   swapDuration: 900, swapPause: 600, pointsPerProduct: 150 },
+  { round: 5, rows: 4, cols: 5, samsungCount: 5, taps: 6, revealTime: 5000, selectionTime: 6,  swapCount: [12, 14], swapDuration: 900, swapPause: 600, pointsPerProduct: 200 },
+  { round: 6, rows: 4, cols: 5, samsungCount: 5, taps: 6, revealTime: 5000, selectionTime: 5,  swapCount: [14, 16], swapDuration: 900, swapPause: 600, pointsPerProduct: 250 },
+  { round: 7, rows: 5, cols: 5, samsungCount: 5, taps: 6, revealTime: 4000, selectionTime: 5,  swapCount: [16, 18], swapDuration: 900, swapPause: 600, pointsPerProduct: 350 },
+  { round: 8, rows: 5, cols: 5, samsungCount: 5, taps: 5, revealTime: 4000, selectionTime: 4,  swapCount: [18, 20], swapDuration: 900, swapPause: 600, pointsPerProduct: 500 },
 ];
 
 // --- Prize Tiers ---
 export const PRIZE_TIERS = [
-  { threshold: 200, name: 'Animal Keychain', tier: 'keychain' },
-  { threshold: 1500, name: 'Grand Prize', tier: 'grand' },
+  { threshold: 700, name: 'Regular Prize', tier: 'keychain' },
+  { threshold: 3000, name: 'Grand Prize', tier: 'grand' },
 ];
 
 // --- Grand Prize ---
-export const GRAND_PRIZE_THRESHOLD = 1500;
+export const GRAND_PRIZE_THRESHOLD = 3000;
 export const GRAND_PRIZE_DAILY_MAX = 2;
 
 const GP_STORAGE_KEY = 'galaxy-sync-grand-prize-winners';
